@@ -1,1 +1,7 @@
- <exec file name> <max. paralel instances>
+nop 3
+bcompress 4
+bdecompress
+gcompress 2
+gdecompress
+encrypt 2
+decrypt 2

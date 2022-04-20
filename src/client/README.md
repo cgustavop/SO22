@@ -1,3 +1,0 @@
-﻿# CLIENT
-
-client source code

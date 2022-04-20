@@ -1,3 +1,0 @@
-﻿# SERVER
-
-server source code
