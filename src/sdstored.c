@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <fcntl.h>
 
@@ -61,7 +62,8 @@ ssize_t readln(int fd, char *buf, size_t size){
 // <exec file name> <max. paralel instances>
 int set_config(char* config_file_path){ //lê o config file linha a linha e define parâmetros para as várias transformações
     
-    int fd = open(config_file_path, O_RDONLY);
+    int fd = openat(AT_FDCWD, config_file_path, O_RDONLY);
+    printf("%s\n", config_file_path);
     if(fd == -1) return 1;
     char buf[64];
 
@@ -72,13 +74,14 @@ int set_config(char* config_file_path){ //lê o config file linha a linha e defi
         for (i = 0; i < 2 && token != NULL; i++) {
             switch (i) {
                 case 0:
-                    printf("name: %s\n", token);
+                    //printf("name: %s", token);
                     strncpy(transfs[j].name, token, 15);
                     //strcpy(transfs[j].bin, token);
                     break;
                 case 1:
                     //strcpy(transfs[j].max_inst, token);
                     transfs[j].max_inst = atoi(token);
+                    //printf("\n\tmax instances: %d\n", transfs[j].max_inst);
                     break;
             }
             token = strtok(NULL, " "); // cleaning token
@@ -107,40 +110,48 @@ void apply_transformation(){
 
 }
 
-void handle_request(){
+void handle_request(int fd){
     
     //comunicação do cliente->servidor
     Process process;
 
-    printf("Opening client to server fifo...\n");
-    int fd = open("tmp/client_to_server_fifo", O_RDONLY);
-    if(fd == -1) printf("Failed opening FIFO.");
+    while(1){
+        sleep(1);
+        if(read(fd, &process, sizeof(struct process)) > 0){;
 
-    printf("Reading request...\n");
-    read(fd, &process, sizeof(struct process));
+            //debug
+            printf("Request details:\n");
+            printf("\tClient PID: %d\n", process.client_pid);
+            printf("\tFirst transformation: %s\n", process.transf_names[0]);
+            printf("\tInput path: %s\n", process.input);
+            printf("\tOutput path: %s\n", process.output);
+            printf("\tTotal transformations requested: %d\n", process.number_transformations);
 
-    //debug
-    printf("Request details:\n");
-    printf("\tClient PID: %d\n", process.client_pid);
-    printf("\tFirst transformation: %s\n", process.transf_names[0]);
-    printf("\tInput path: %s\n", process.input);
-    printf("\tOutput path: %s\n", process.output);
-    printf("\tTotal transformations requested: %d\n", process.number_transformations);
+        }else printf("Nothing to read.\n");
+    }
     
 }
 int main(int argc, char* argv[]){
 
     server_pid = getpid();
-    strcpy(transf_folder, argv[2]); //guarda o path onde estão guardadas as transformações
+    strcpy(transf_folder, argv[1]); //guarda o path onde estão guardadas as transformações
     printf("SETTING UP SERVER...\n");
-    if(set_config(argv[1])){ //se retornou um valor != 0 ocorreu algum erro
+    if(set_config(argv[2])){ //se retornou um valor != 0 ocorreu algum erro
         printf("Erro na leitura do ficheiro %s\n", argv[2]);
         return 1;
     }
-    printf("SETUP COMPLETE...\n");
+
+    printf("Opening client to server fifo...\n");
+    mkfifo(CLIENT_TO_SERVER_FIFO, 0666);
+    int fd = open(CLIENT_TO_SERVER_FIFO, O_RDONLY | O_NONBLOCK);
+    if(fd == -1){ 
+        printf("Failed opening FIFO.\n");
+    }else printf("FIFO created.\n");
+
+    printf("\nSETUP COMPLETE...\n");
 
     printf("Searching for requests...\n");
-    handle_request();
+    handle_request(fd);
 
     return 0;
 }
