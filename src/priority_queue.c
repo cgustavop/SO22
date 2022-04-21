@@ -2,9 +2,11 @@
 #include <string.h>
 #include <assert.h>
 #include <stdio.h>
+#include <stdbool.h>
 
 typedef struct priorityQueue{
     char *arr;
+    void *swap_buf;
     size_t data_size;
     size_t arr_size;
     size_t arr_len;
@@ -15,6 +17,7 @@ typedef struct priorityQueue{
 PriorityQueue *pq_new(size_t data_size, int(comparator)(void*, void*)){
     PriorityQueue *pq = malloc(sizeof(PriorityQueue));
     pq->arr = malloc(data_size*4);
+    pq->swap_buf = malloc(data_size);
     pq->data_size = data_size;
     pq->arr_size = 4;
     pq->arr_len = 0;
@@ -24,6 +27,7 @@ PriorityQueue *pq_new(size_t data_size, int(comparator)(void*, void*)){
 
 void pq_free(PriorityQueue *pq){
     free(pq->arr);
+    free(pq->swap_buf);
     free(pq);
 }
 
@@ -45,11 +49,14 @@ void pq_enqueue(void *data, PriorityQueue *pq){
     }
 }
 
-void pq_dequeue(void *data_out, PriorityQueue *pq){
+bool pq_dequeue(void *data_out, PriorityQueue *pq){
+
+    if(pq->arr_len==0)
+        return false;
     
     memcpy(data_out, pq->arr, pq->data_size);
 
-    void *last = malloc(pq->data_size);
+    void *last = pq->swap_buf;
 
     --pq->arr_len;
 
@@ -79,18 +86,21 @@ void pq_dequeue(void *data_out, PriorityQueue *pq){
         ind = next_ind;
     }
 
-    free(last);
-
     if(pq->arr_len<pq->arr_size/3){
-        pq->arr = realloc(pq->arr, pq->data_size * pq->arr_len);
-        pq->arr_size = pq->arr_len;
+        pq->arr_size = pq->arr_size/2;
+        pq->arr = realloc(pq->arr, pq->data_size * pq->arr_size);
     }
 
+    return true;
 }
 
-void pq_peek(void* data_out, PriorityQueue *pq){
-    if(pq->arr_len>0)
+bool pq_peek(void* data_out, PriorityQueue *pq){
+    if(pq->arr_len>0){
         memcpy(data_out, pq->arr, pq->data_size);
+        return true;
+    }
+    else
+        return false;
 }
 
 
@@ -114,6 +124,8 @@ int main(){
         pq_enqueue(&i, pq);
     }
 
+    printf("arr_size:%ld\narr_len:%ld\n", pq->arr_size, pq->arr_len);
+
     // printf("arr: ");
     // for(int i=0;i<10;++i){
     //     printf("%d ", *(pq->arr+sizeof(int)*i));
@@ -130,6 +142,10 @@ int main(){
         // }
         // printf("\n\n");
     }
+
+    printf("arr_size:%ld\narr_len:%ld\n", pq->arr_size, pq->arr_len);
+
+    assert(pq_dequeue(NULL, pq)==false);
 
     pq_free(pq);
 
