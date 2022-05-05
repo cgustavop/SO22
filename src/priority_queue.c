@@ -103,6 +103,12 @@ bool pq_peek(void* data_out, PriorityQueue *pq){
         return false;
 }
 
+bool pq_is_empty(PriorityQueue *pq){
+    if(pq->arr_len>0)
+        return false;
+    else
+        return true;
+}
 
 int int_comparator(void *a, void *b){
     int *na = a, *nb = b;
@@ -115,39 +121,39 @@ int int_comparator(void *a, void *b){
         return 0;
 }
 
-int main(){
-    PriorityQueue *pq = pq_new(sizeof(int),int_comparator);
+// int main(){
+//     PriorityQueue *pq = pq_new(sizeof(int),int_comparator);
 
-    int len = 1000;
+//     int len = 1000;
 
-    for(int i=0;i<len;++i){
-        pq_enqueue(&i, pq);
-    }
+//     for(int i=0;i<len;++i){
+//         pq_enqueue(&i, pq);
+//     }
 
-    printf("arr_size:%ld\narr_len:%ld\n", pq->arr_size, pq->arr_len);
+//     printf("arr_size:%ld\narr_len:%ld\n", pq->arr_size, pq->arr_len);
 
-    // printf("arr: ");
-    // for(int i=0;i<10;++i){
-    //     printf("%d ", *(pq->arr+sizeof(int)*i));
-    // }
-    // printf("\n\n");
+//     // printf("arr: ");
+//     // for(int i=0;i<10;++i){
+//     //     printf("%d ", *(pq->arr+sizeof(int)*i));
+//     // }
+//     // printf("\n\n");
 
-    for(int i=len-1, buf;i>=0;--i){
-        pq_dequeue(&buf, pq);
-        assert(buf==i);
-        // printf("i:%d, buf:%d\n", i, buf);
-        // printf("arr: ");
-        // for(int i=0;i<pq->arr_len;++i){
-        //     printf("%d ", *(pq->arr+sizeof(int)*i));
-        // }
-        // printf("\n\n");
-    }
+//     for(int i=len-1, buf;i>=0;--i){
+//         pq_dequeue(&buf, pq);
+//         assert(buf==i);
+//         // printf("i:%d, buf:%d\n", i, buf);
+//         // printf("arr: ");
+//         // for(int i=0;i<pq->arr_len;++i){
+//         //     printf("%d ", *(pq->arr+sizeof(int)*i));
+//         // }
+//         // printf("\n\n");
+//     }
 
-    printf("arr_size:%ld\narr_len:%ld\n", pq->arr_size, pq->arr_len);
+//     printf("arr_size:%ld\narr_len:%ld\n", pq->arr_size, pq->arr_len);
 
-    assert(pq_dequeue(NULL, pq)==false);
+//     assert(pq_dequeue(NULL, pq)==false);
 
-    pq_free(pq);
+//     pq_free(pq);
 
-    return 0;
-}
+//     return 0;
+// }

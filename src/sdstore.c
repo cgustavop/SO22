@@ -1,3 +1,5 @@
+#include <assert.h>
+#include <linux/limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -5,9 +7,10 @@
 #include <unistd.h>
 #include <fcntl.h>
 
-#include "process.h"
+#include "request.h"
 
-#define CLIENT_TO_SERVER_FIFO "tmp/client_to_server_fifo" //path para o fifo que permite a comunicação entre o cliente e o servidor
+static_assert(sizeof(Request)+sizeof(ProcessRequestData)<=PIPE_BUF, "requests too big, non atomic writes");
+
 int fd[2]; //guarda os file descriptors dos fifos escrita (0), leitura (1)
 
 int status(){
@@ -16,11 +19,12 @@ int status(){
     return 0; //return 1 se consegue estabelecer ligação com o servidor e 0 caso contrário
 }
 
-int send_request(Process process){
+
+int send_process_request(Request *request){
     
     //comunicação do cliente->servidor
     printf("Opening client to server fifo...\n");
-    fd[0] = open("tmp/client_to_server_fifo", O_WRONLY);
+    fd[0] = open(CLIENT_TO_SERVER_FIFO, O_WRONLY);
     if(fd[0] == -1) return 1; //falhou ligação
     printf("Connection established\n");
     
@@ -28,33 +32,38 @@ int send_request(Process process){
     //mkfifo("tmp/server_to_client_fifo", O_RDONLY); 
     //fd[1] = open("tmp/server_to_client_fifo", O_RDONLY);
     printf("Sending request\n");
-    write(fd[0], &process, sizeof(struct process));
+    write(fd[0], request, sizeof(Request)+sizeof(ProcessRequestData));
     printf("Request sent.\n");
 
     return 0; 
 }
 
-Process create_process(char** execs, int total_num_transfs, char* input_path, char* output_path){
-    Process process;
+void create_request(char** execs, int total_num_transfs, char* input_path, char* output_path, Request *req){
+    ProcessRequestData *req_data = (ProcessRequestData*)req->data;
 
-    process.client_pid = getpid();
-    process.fork_pid = 0;
+    req->client_pid = getpid();
+    req->priority = 0;
+    req->type = PROCESS_REQUEST;
 
     for(int i = 0; i < total_num_transfs; i++){
-        strncpy(process.transf_names[i], execs[i], 16);
+        strncpy(req_data->transf_names[i], execs[i], 16);
     }
+    char *inp = realpath(input_path, NULL);
+    char *outp = realpath(output_path, NULL);
+    strncpy(req_data->input, inp, strlen(inp));
+    strncpy(req_data->output, outp, strlen(outp));
+    free(inp);
+    free(outp);
 
-    strncpy(process.input, input_path, 1023);
-    strncpy(process.output, output_path, 1023);
+    req_data->transf_num = total_num_transfs;
 
-    process.number_transformations = total_num_transfs;
-    process.active = 0;
-    process.inqueue = 0;
-
-    return process;
 }
+
                                     //    0      1           2               3                   4...
 int main(int argc, char* argv[]){ //./sdstore proc-file samples/file-a outputs/file-a-output bcompress nop gcompress encrypt nop
+
+    char req_buf[sizeof(Request)+sizeof(ProcessRequestData)];
+    Request *req = (Request*)req_buf;
 
     int i, total_num_transfs = 0;
 
@@ -67,14 +76,24 @@ int main(int argc, char* argv[]){ //./sdstore proc-file samples/file-a outputs/f
                 execs[total_num_transfs] = argv[i];
                 total_num_transfs++;
             }
-            
-            Process process = create_process(execs, total_num_transfs, argv[2], argv[3]);
 
-            if(send_request(process)) printf("Unable to make request.");
+            // realpath falha para ficheiros não existentes
+            if( open(argv[2], O_CREAT | O_RDONLY, 0666)==-1 ||
+                open(argv[3], O_CREAT | O_TRUNC, 0666)==-1)
+            {
+                perror("Error opening paths");
+                return 1;
+            }           
+            
+            create_request(execs, total_num_transfs, argv[2], argv[3], req);
+
+            if(send_process_request(req)) perror("Unable to make request.");
 
         } else if(strcmp(argv[1], "status") == 0){
-                if(!status()) printf("Não foi possível estabelecer ligação ao servidor.");
+                if(!status()) printf("Não foi possível estabelecer ligação ao servidor.\n");
         }
+    }else{
+        fprintf(stderr, "wrong arg count\n");
     }
     return 0;
 }
