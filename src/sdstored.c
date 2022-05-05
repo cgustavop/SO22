@@ -76,9 +76,7 @@ void sigterm_handler(int signum){
 
 // <exec file name> <max. paralel instances>
 int set_config(char* config_file_path){ //lê o config file linha a linha e define parâmetros para as várias transformações
-    char *conf_path = realpath(config_file_path, NULL);
-    int fd = open(conf_path, O_RDONLY);
-    free(conf_path);
+    int fd = openat(AT_FDCWD, config_file_path, O_RDONLY);
 
     printf("%s\n", config_file_path);
     if(fd == -1) return 1;
