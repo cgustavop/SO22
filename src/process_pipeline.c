@@ -8,16 +8,16 @@
 
 
 typedef struct processPipeline{
-    size_t pid_arr_len;
-    size_t pid_arr_size;
-    size_t end_num;
+    int pid_arr_len;
+    int pid_arr_size;
+    int end_num;
     int reader_pipe;
     int input_fd, output_fd;
     int pid_arr[];
 }ProcessPipeline;
 
 
-ProcessPipeline *pp_new(size_t process_num, int input_fd, int output_fd){
+ProcessPipeline *pp_new(int process_num, int input_fd, int output_fd){
     ProcessPipeline *pp = malloc(sizeof(ProcessPipeline)+process_num*sizeof(int));
     pp->pid_arr_size = process_num;
     pp->pid_arr_len = 0;
@@ -83,7 +83,7 @@ bool pp_add(const char *exec_path, char *const exec_args[], ProcessPipeline *pp)
 }
 
 bool pp_wait_check_all(ProcessPipeline *pp){
-    for(size_t i=0;i<pp->pid_arr_len;++i){
+    for(int i=0;i<pp->pid_arr_len;++i){
         int st;
         waitpid(pp->pid_arr[i], &st, 0);
         if(!WIFEXITED(st) || WEXITSTATUS(st)!=0)
@@ -106,7 +106,7 @@ int pp_check_end_num(ProcessPipeline *pp){
     return pp->end_num;
 }
 
-size_t pp_get_process_num(ProcessPipeline *pp){
+int pp_get_process_num(ProcessPipeline *pp){
     return pp->pid_arr_len;
 }
 

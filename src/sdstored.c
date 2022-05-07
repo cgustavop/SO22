@@ -1,43 +1,40 @@
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/poll.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <linux/limits.h>
+#include <errno.h>
+#include <assert.h>
+#include <poll.h>
 
-#include "process.h"
+#include "request.h"
+#include "priority_queue.h"
+
+
+static_assert(sizeof(Request)+sizeof(ProcessRequestData)<=PIPE_BUF, "requests too big, non atomic writes");
 
 enum transformations {nop, bcompress, bdecompress, gcompress, gdecompress, encrypt, decrypt};
-#define CLIENT_TO_SERVER_FIFO "tmp/client_to_server_fifo" //path para o fifo que permite a comunicação entre o cliente e o servidor
 #define TOTAL_TRANSFORMATIONS_NUMBER 6
-//definir transformações
+
+
 typedef struct transformation {
     char name[16];
-    //char bin[16]; not sure se isto é necessário na realidade
     int max_inst;
     int running_inst;
 } Transformation;
 
-/*definir processos
-typedef struct process {
-    int client_pid;
-    int fork_pid;
-    char transf_names[16][16];
-    char input[1024];
-    char output[1024];
-    int number_transformations;
-    int active;
-    int inqueue;
-} Process;
-*/
 
 int server_pid; //para guardar o pid do servidor
-char transf_folder[1024]; //onde será guardado o path da pasta onde se encontram os executáveis das transformações
+char *transf_folder; //onde será guardado o path da pasta onde se encontram os executáveis das transformações
 Transformation transfs[TOTAL_TRANSFORMATIONS_NUMBER]; //lista das várias transformações
+bool server_exit=false;
 
-//definir a queue para 20 users em simultâneo
-
+PriorityQueue *requests_queue;
 
 
 int readc(int fd, char* c){
@@ -47,7 +44,7 @@ int readc(int fd, char* c){
 
 ssize_t readln(int fd, char *buf, size_t size){
     
-    int i = 0;
+    size_t i = 0;
 
     while(i < size && readc(fd, &buf[i]) > 0){
         i++;
@@ -59,10 +56,28 @@ ssize_t readln(int fd, char *buf, size_t size){
     return i;
 }
 
+int request_prio_comp(void *va, void *vb){
+    Request *a = va, *b = vb;
+
+    if(a->priority>b->priority)
+        return 1;
+    else if(a->priority<b->priority)
+        return -1;
+    else
+       return 0;
+}
+
+
+void sigterm_handler(int signum){
+    (void)signum;
+    server_exit = true;
+}
+
+
 // <exec file name> <max. paralel instances>
 int set_config(char* config_file_path){ //lê o config file linha a linha e define parâmetros para as várias transformações
-    
     int fd = openat(AT_FDCWD, config_file_path, O_RDONLY);
+
     printf("%s\n", config_file_path);
     if(fd == -1) return 1;
     char buf[64];
@@ -74,14 +89,10 @@ int set_config(char* config_file_path){ //lê o config file linha a linha e defi
         for (i = 0; i < 2 && token != NULL; i++) {
             switch (i) {
                 case 0:
-                    //printf("name: %s", token);
                     strncpy(transfs[j].name, token, 15);
-                    //strcpy(transfs[j].bin, token);
                     break;
                 case 1:
-                    //strcpy(transfs[j].max_inst, token);
                     transfs[j].max_inst = atoi(token);
-                    //printf("\n\tmax instances: %d\n", transfs[j].max_inst);
                     break;
             }
             token = strtok(NULL, " "); // cleaning token
@@ -94,47 +105,73 @@ int set_config(char* config_file_path){ //lê o config file linha a linha e defi
     return 0;
 }
 
-void send_status(){
 
-}
+bool request_loop(int fifo_fd){
 
-void read_from_pipe(){
-
-}
-
-void write_to_pipe(){
-
-}
-
-void apply_transformation(){
-
-}
-
-void handle_request(int fd){
-    
-    //comunicação do cliente->servidor
-    Process process;
-
-    while(1){
-        sleep(1);
-        if(read(fd, &process, sizeof(struct process)) > 0){;
-
-            //debug
-            printf("Request details:\n");
-            printf("\tClient PID: %d\n", process.client_pid);
-            printf("\tFirst transformation: %s\n", process.transf_names[0]);
-            printf("\tInput path: %s\n", process.input);
-            printf("\tOutput path: %s\n", process.output);
-            printf("\tTotal transformations requested: %d\n", process.number_transformations);
-
-        }else printf("Nothing to read.\n");
+    while(pq_is_empty(requests_queue) && !server_exit){
+        struct pollfd pfd = {
+            .events = POLLIN,
+            .fd = fifo_fd,
+        };
+        poll(&pfd, 1, -1);
+        int n=0;
+        Request hdr;
+        char *read_buf = (char*)&hdr;
+        ssize_t read_buf_size = sizeof(Request);
+        bool reading_process_data = false;
+        while((n=read(fifo_fd, read_buf, read_buf_size))!=0){
+            if(n==-1){
+                if(errno==EAGAIN || errno==EWOULDBLOCK){
+                    continue;
+                }
+                else{
+                    perror("Client -> Server Fifo");
+                    return false;
+                }
+            }
+            else if(n!=read_buf_size){
+                read_buf_size = read_buf_size-n;
+                read_buf += n;
+            }
+            else if(hdr.type==STATUS_REQUEST){
+                Request *rq = malloc(sizeof(Request));
+                *rq = hdr;
+                pq_enqueue(&rq, requests_queue);
+                read_buf = (char*)&hdr;
+                read_buf_size = sizeof(Request);
+            }
+            else if(hdr.type==PROCESS_REQUEST){
+                Request *p_rq;
+                if(!reading_process_data){
+                    p_rq = calloc(1, sizeof(Request)+sizeof(ProcessRequestData));
+                    *p_rq = hdr;
+                    read_buf = (char*)p_rq->data;
+                    read_buf_size = sizeof(ProcessRequestData);
+                    reading_process_data = true;
+                }
+                else{
+                    pq_enqueue(&p_rq, requests_queue);
+                    read_buf = (char*)&hdr;
+                    read_buf_size = sizeof(Request);
+                    reading_process_data = false;
+                    fprintf(stderr, "received\n");
+                }
+            }
+        }
     }
-    
+    return true;
 }
+
+
 int main(int argc, char* argv[]){
 
+    if(argc<3){
+        fprintf(stderr, "Wrong arg count\n");
+        return 1;
+    }
+
     server_pid = getpid();
-    strcpy(transf_folder, argv[1]); //guarda o path onde estão guardadas as transformações
+    transf_folder = argv[1]; //guarda o path onde estão guardadas as transformações
     printf("SETTING UP SERVER...\n");
     if(set_config(argv[2])){ //se retornou um valor != 0 ocorreu algum erro
         printf("Erro na leitura do ficheiro %s\n", argv[2]);
@@ -142,16 +179,29 @@ int main(int argc, char* argv[]){
     }
 
     printf("Opening client to server fifo...\n");
-    mkfifo(CLIENT_TO_SERVER_FIFO, 0666);
+    if(mkfifo(CLIENT_TO_SERVER_FIFO, 0666)!=0){
+        perror("mkfifo");
+    }
     int fd = open(CLIENT_TO_SERVER_FIFO, O_RDONLY | O_NONBLOCK);
     if(fd == -1){ 
-        printf("Failed opening FIFO.\n");
+        perror("Failed opening FIFO.");
+        server_exit = true;
     }else printf("FIFO created.\n");
+
+    requests_queue = pq_new(sizeof(Request*), request_prio_comp);
 
     printf("\nSETUP COMPLETE...\n");
 
-    printf("Searching for requests...\n");
-    handle_request(fd);
+    while(!server_exit){
+        printf("Searching for requests...\n");
+        request_loop(fd);
+        // teste
+        Request *rq;
+        while(pq_dequeue(&rq, requests_queue)){
+            printf("client pid:%d\n",rq->client_pid);
+            free(rq);
+        }
+    }
 
     return 0;
 }

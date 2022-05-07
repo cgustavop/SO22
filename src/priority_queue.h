@@ -24,4 +24,6 @@ bool pq_dequeue(void *data_out, PriorityQueue *pq);
 // returns false if empty
 bool pq_peek(void* data_out, PriorityQueue *pq);
 
+bool pq_is_empty(PriorityQueue *pq);
+
 #endif
