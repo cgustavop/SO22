@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
 #include <fcntl.h>
@@ -35,6 +36,7 @@ int send_process_request(Request *request){
     write(fd[0], request, sizeof(Request)+sizeof(ProcessRequestData));
     printf("Request sent.\n");
 
+    close(fd[0]);
     return 0; 
 }
 
@@ -50,14 +52,15 @@ void create_request(char** execs, int total_num_transfs, char* input_path, char*
     }
     char *inp = realpath(input_path, NULL);
     char *outp = realpath(output_path, NULL);
-    strncpy(req_data->input, inp, strlen(inp));
-    strncpy(req_data->output, outp, strlen(outp));
+    strncpy(req_data->input, inp, strlen(inp)+1);
+    strncpy(req_data->output, outp, strlen(outp)+1);
     free(inp);
     free(outp);
 
     req_data->transf_num = total_num_transfs;
 
 }
+
 
                                     //    0      1           2               3                   4...
 int main(int argc, char* argv[]){ //./sdstore proc-file samples/file-a outputs/file-a-output bcompress nop gcompress encrypt nop
@@ -70,6 +73,12 @@ int main(int argc, char* argv[]){ //./sdstore proc-file samples/file-a outputs/f
     if(argc > 1){
         if(strcmp(argv[1], "proc-file") == 0){
             
+            char buf[64];
+            int fd=-1, n = snprintf(buf, 64, SERVER_TO_CLIENT_FIFO_TEMPL"%d", getpid());
+            if(n<=64 && n>0){
+                mkfifo(buf, 0666);
+            }
+
             char* execs[argc - 4];
 
             for(i = 4; i < argc; i++){
@@ -77,17 +86,25 @@ int main(int argc, char* argv[]){ //./sdstore proc-file samples/file-a outputs/f
                 total_num_transfs++;
             }
 
+            int fdinp, fdout;
             // realpath falha para ficheiros não existentes
-            if( open(argv[2], O_CREAT | O_RDONLY, 0666)==-1 ||
-                open(argv[3], O_CREAT | O_TRUNC, 0666)==-1)
+            if( (fdinp=open(argv[2], O_CREAT | O_RDONLY, 0666))==-1 ||
+                (fdout=open(argv[3], O_CREAT | O_TRUNC, 0666))==-1)
             {
                 perror("Error opening paths");
                 return 1;
-            }           
+            }
+            else{
+                close(fdinp);
+                close(fdout);
+            }
             
             create_request(execs, total_num_transfs, argv[2], argv[3], req);
 
             if(send_process_request(req)) perror("Unable to make request.");
+
+            fd = open(buf, O_RDONLY, 0666);
+            close(fd);
 
         } else if(strcmp(argv[1], "status") == 0){
                 if(!status()) printf("Não foi possível estabelecer ligação ao servidor.\n");

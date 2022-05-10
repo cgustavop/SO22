@@ -1,11 +1,13 @@
 #ifndef __PROCESS_H__
 #define __PROCESS_H__
 
+#include "process_pipeline.h"
 
 #define PATH_SIZE 1024
 
 #define CLIENT_TO_SERVER_FIFO "/tmp/client_to_server_fifo" //path para o fifo que permite a comunicação entre o cliente e o servidor
 
+#define SERVER_TO_CLIENT_FIFO_TEMPL "/tmp/server_to_client_fifo_"
 
 typedef enum RequestType{
     STATUS_REQUEST,
@@ -25,9 +27,37 @@ typedef struct request {
     RequestType type;
     int client_pid;
     int priority;
+    int pipe_fd;
+    int num;
     ProcessRequestData data[];
 }Request;
 
+typedef struct process {
+    Request *req;
+    ProcessPipeline *pp;
+    int inp_fd;
+    int out_fd;
+    int completed_num;
+    bool is_valid;
+}Process;
+
+typedef enum transformations {
+    nop=0,
+    bcompress=1,
+    bdecompress=2, 
+    gcompress=3, 
+    gdecompress=4, 
+    encrypt=5, 
+    decrypt=6
+}Transformations;
+
+#define TOTAL_TRANSFORMATIONS_NUMBER 6
+
+typedef struct transformationData {
+    char name[16];
+    int max_inst;
+    int running_inst;
+} TransformationData;
 
 
 

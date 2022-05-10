@@ -14,27 +14,33 @@
 
 #include "request.h"
 #include "priority_queue.h"
+#include "process_pipeline.h"
 
 
 static_assert(sizeof(Request)+sizeof(ProcessRequestData)<=PIPE_BUF, "requests too big, non atomic writes");
 
-enum transformations {nop, bcompress, bdecompress, gcompress, gdecompress, encrypt, decrypt};
-#define TOTAL_TRANSFORMATIONS_NUMBER 6
 
+static char *transf_names[] = {
+    "nop\0",
+    "bcompress\0",
+    "bdecompress\0", 
+    "gcompress\0", 
+    "gdecompress\0", 
+    "encrypt\0", 
+    "decrypt\0"
+};
 
-typedef struct transformation {
-    char name[16];
-    int max_inst;
-    int running_inst;
-} Transformation;
-
+char *transf_paths[TOTAL_TRANSFORMATIONS_NUMBER];
 
 int server_pid; //para guardar o pid do servidor
 char *transf_folder; //onde será guardado o path da pasta onde se encontram os executáveis das transformações
-Transformation transfs[TOTAL_TRANSFORMATIONS_NUMBER]; //lista das várias transformações
+TransformationData transfs[TOTAL_TRANSFORMATIONS_NUMBER]; //lista das várias transformações
 bool server_exit=false;
+int request_counter=0;
 
 PriorityQueue *requests_queue;
+PriorityQueue *executing_prcs_queue;
+PriorityQueue *executing_prcs_queue_swap;
 
 
 int readc(int fd, char* c){
@@ -57,7 +63,7 @@ ssize_t readln(int fd, char *buf, size_t size){
 }
 
 int request_prio_comp(void *va, void *vb){
-    Request *a = va, *b = vb;
+    Request *a = *(Request**)va, *b = *(Request**)vb;
 
     if(a->priority>b->priority)
         return 1;
@@ -67,28 +73,44 @@ int request_prio_comp(void *va, void *vb){
        return 0;
 }
 
+int process_prio_comp(void *va, void *vb){
+    return request_prio_comp(&((Process*)va)->req, &((Process*)vb)->req);
+}
+
 
 void sigterm_handler(int signum){
     (void)signum;
     server_exit = true;
 }
 
+bool string_to_transformation(char *str, Transformations *out){
+    for(int i=0;i<TOTAL_TRANSFORMATIONS_NUMBER;++i){
+        if(strcmp(str, transf_names[i])==0){
+            *out = i;
+            return true;
+        }
+    }
+    return false;
+}
 
 // <exec file name> <max. paralel instances>
 int set_config(char* config_file_path){ //lê o config file linha a linha e define parâmetros para as várias transformações
     int fd = openat(AT_FDCWD, config_file_path, O_RDONLY);
 
-    printf("%s\n", config_file_path);
+    // printf("%s\n", config_file_path);
     if(fd == -1) return 1;
     char buf[64];
 
     while ((readln(fd, buf, 64)) > 0) {
         
         char* token = strtok(buf, " ");
-        int i, j = 0;
+        int i = 0;
+        Transformations j;
         for (i = 0; i < 2 && token != NULL; i++) {
             switch (i) {
                 case 0:
+                    if(!string_to_transformation(token, &j))
+                        continue;
                     strncpy(transfs[j].name, token, 15);
                     break;
                 case 1:
@@ -98,34 +120,59 @@ int set_config(char* config_file_path){ //lê o config file linha a linha e defi
             token = strtok(NULL, " "); // cleaning token
         }
         transfs[j].running_inst = 0;
-        j++;
     }
     close(fd);
 
     return 0;
 }
 
+void set_transf_paths(){
+    int tr_fld_len = strlen(transf_folder);
+    for(int i=0;i<TOTAL_TRANSFORMATIONS_NUMBER;++i){
+        int transf_name_len = strlen(transf_names[i])+1;
+        char *str = malloc(transf_name_len+tr_fld_len);
+        memcpy(str, transf_folder, tr_fld_len);
+        memcpy(str+tr_fld_len, transf_names[i], transf_name_len);
+        transf_paths[i] = str;
+    }
+}
+
+// returns pipe fd; -1==error
+int open_server_to_client_fifo(Request *rq){
+    char buf[64];
+    int fd=-1, n = snprintf(buf, 64, SERVER_TO_CLIENT_FIFO_TEMPL"%d", rq->client_pid);
+    if(n<=64 && n>0){
+        fd = open(buf, O_WRONLY, 0666);
+    }
+
+    return fd;
+}
 
 bool request_loop(int fifo_fd){
 
-    while(pq_is_empty(requests_queue) && !server_exit){
+    while(pq_is_empty(executing_prcs_queue) && pq_is_empty(requests_queue) && !server_exit){
         struct pollfd pfd = {
             .events = POLLIN,
             .fd = fifo_fd,
         };
-        poll(&pfd, 1, -1);
+        if(poll(&pfd, 1, -1)==-1){
+            perror("poll");
+        }
         int n=0;
         Request hdr;
+        Request *p_req=NULL;
         char *read_buf = (char*)&hdr;
         ssize_t read_buf_size = sizeof(Request);
-        bool reading_process_data = false;
+
         while((n=read(fifo_fd, read_buf, read_buf_size))!=0){
             if(n==-1){
                 if(errno==EAGAIN || errno==EWOULDBLOCK){
+                    poll(&pfd, 1, 20);
                     continue;
                 }
                 else{
                     perror("Client -> Server Fifo");
+                    free(p_req);
                     return false;
                 }
             }
@@ -141,20 +188,28 @@ bool request_loop(int fifo_fd){
                 read_buf_size = sizeof(Request);
             }
             else if(hdr.type==PROCESS_REQUEST){
-                Request *p_rq;
-                if(!reading_process_data){
-                    p_rq = calloc(1, sizeof(Request)+sizeof(ProcessRequestData));
-                    *p_rq = hdr;
-                    read_buf = (char*)p_rq->data;
+                if(p_req==NULL){
+                    p_req = calloc(1, sizeof(Request)+sizeof(ProcessRequestData));
+                    *p_req = hdr;
+                    read_buf = (char*)p_req->data;
                     read_buf_size = sizeof(ProcessRequestData);
-                    reading_process_data = true;
                 }
                 else{
-                    pq_enqueue(&p_rq, requests_queue);
-                    read_buf = (char*)&hdr;
-                    read_buf_size = sizeof(Request);
-                    reading_process_data = false;
-                    fprintf(stderr, "received\n");
+                    int fd;
+                    if((fd=open_server_to_client_fifo(p_req))!=-1){
+                        p_req->pipe_fd = fd;
+                        p_req->num = request_counter++;
+                        pq_enqueue(&p_req, requests_queue);
+                        read_buf = (char*)&hdr;
+                        read_buf_size = sizeof(Request);
+                        p_req = NULL;
+                        printf("pushed new request\n");
+                        // mandar pending
+                    }
+                    else{
+                        printf("failed to open server to client fifo\n");
+                        free(p_req);
+                    }
                 }
             }
         }
@@ -162,6 +217,49 @@ bool request_loop(int fifo_fd){
     return true;
 }
 
+Process prcs_new(Request *rq){
+    Process prcs = {
+        .req = rq,
+        .inp_fd = open(rq->data->input, O_RDONLY, 0666),
+        .out_fd = open(rq->data->output, O_WRONLY, 0666),
+        .completed_num = 0,
+        .is_valid = false,
+    };
+
+    if(prcs.inp_fd!=-1 && prcs.out_fd!=-1){
+        prcs.is_valid = true;
+        prcs.pp = pp_new(rq->data->transf_num, prcs.inp_fd, prcs.out_fd);
+    }
+
+    return prcs;
+}
+
+void prcs_add_transf(Process *prcs){
+    if(!prcs->is_valid)
+        return;
+    for(int i=pp_get_len(prcs->pp);prcs->is_valid && i<prcs->req->data->transf_num;++i){
+        Transformations tr;
+        if(!string_to_transformation(prcs->req->data->transf_names[i], &tr))
+            prcs->is_valid=false;
+        
+        else if(transfs[tr].running_inst==transfs[tr].max_inst){
+            break;
+        }
+        
+        else if(!pp_add(transf_paths[tr], (char*[]){transf_paths[tr], NULL}, prcs->pp))
+            prcs->is_valid=false;
+        
+        else
+            ++transfs[tr].running_inst;
+    }
+}
+
+void prcs_free(Process prcs){
+    close(prcs.inp_fd);
+    close(prcs.out_fd);
+    pp_free(prcs.pp);
+    free(prcs.req);
+}
 
 int main(int argc, char* argv[]){
 
@@ -173,6 +271,7 @@ int main(int argc, char* argv[]){
     server_pid = getpid();
     transf_folder = argv[1]; //guarda o path onde estão guardadas as transformações
     printf("SETTING UP SERVER...\n");
+    set_transf_paths();
     if(set_config(argv[2])){ //se retornou um valor != 0 ocorreu algum erro
         printf("Erro na leitura do ficheiro %s\n", argv[2]);
         return 1;
@@ -189,20 +288,69 @@ int main(int argc, char* argv[]){
     }else printf("FIFO created.\n");
 
     requests_queue = pq_new(sizeof(Request*), request_prio_comp);
+    executing_prcs_queue = pq_new(sizeof(Process), process_prio_comp);
+    executing_prcs_queue_swap = pq_new(sizeof(Process), process_prio_comp);
 
     printf("\nSETUP COMPLETE...\n");
 
     while(!server_exit){
         printf("Searching for requests...\n");
         request_loop(fd);
-        // teste
+
+        // handle executing prcs
+        if(!pq_is_empty(executing_prcs_queue)){
+            usleep(20*1000); // 50ms
+            printf("handling execution queue\n");
+            Process prcs;
+
+            while(pq_dequeue(&prcs, executing_prcs_queue)){
+                int end_num = pp_check_end_num(prcs.pp);
+                for(int i=prcs.completed_num;i<end_num;++i){
+                    Transformations tr;
+                    string_to_transformation(prcs.req->data->transf_names[i], &tr);
+                    transfs[tr].running_inst--;
+                }
+                prcs.completed_num = end_num;
+                if(end_num==prcs.req->data->transf_num){
+                    printf("prcs done\n");
+                    prcs_free(prcs);
+                }
+                else{
+                    if(pp_get_len(prcs.pp)<prcs.req->data->transf_num)
+                        prcs_add_transf(&prcs);
+                    
+                    if(!prcs.is_valid)
+                        prcs_free(prcs);
+                    
+                    pq_enqueue(&prcs, executing_prcs_queue_swap);
+                }
+            }
+            PriorityQueue *pq = executing_prcs_queue;
+            executing_prcs_queue = executing_prcs_queue_swap;
+            executing_prcs_queue_swap = pq;
+        }
+
         Request *rq;
         while(pq_dequeue(&rq, requests_queue)){
-            printf("client pid:%d\n",rq->client_pid);
-            free(rq);
+            printf("handling new requests\n");
+            if(rq->type==PROCESS_REQUEST){
+                // send executing
+                Process prcs = prcs_new(rq);
+
+                prcs_add_transf(&prcs);
+
+                if(prcs.is_valid){
+                    pq_enqueue(&prcs, executing_prcs_queue);
+                }
+                else{
+                    // send failure
+                    prcs_free(prcs);
+                }
+            }
         }
     }
 
+    close(fd);
     return 0;
 }
 

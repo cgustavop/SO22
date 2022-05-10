@@ -3,10 +3,10 @@ CCFLAGS = -g -Wall -Werror -Wextra -pedantic -fsanitize=undefined -fsanitize=add
 
 all: sdstore sdstored
 
-sdstore :  obj/sdstore.o src/request.h 
+sdstore :  obj/sdstore.o 
 	${CC} $^ -o $@ ${CCFLAGS}
 
-sdstored : obj/sdstored.o obj/priority_queue.o src/request.h src/priority_queue.h
+sdstored : obj/sdstored.o obj/priority_queue.o obj/process_pipeline.o
 	${CC} $^ -o $@ ${CCFLAGS}
 
 obj/sdstore.o : src/sdstore.c
@@ -16,6 +16,9 @@ obj/sdstored.o : src/sdstored.c
 	${CC} $^ -c -o $@ ${CCFLAGS}
 
 obj/priority_queue.o : src/priority_queue.c 
+	${CC} $^ -c -o $@ ${CCFLAGS}
+
+obj/process_pipeline.o : src/process_pipeline.c
 	${CC} $^ -c -o $@ ${CCFLAGS}
 
 clean :

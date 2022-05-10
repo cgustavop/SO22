@@ -1,3 +1,4 @@
+#include <signal.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <unistd.h>
@@ -29,6 +30,8 @@ ProcessPipeline *pp_new(int process_num, int input_fd, int output_fd){
 }
 
 void pp_free(ProcessPipeline *pp){
+    for(int i=0;i<pp->pid_arr_len;++i)
+        kill(pp->pid_arr[i], SIGTERM);
     free(pp);
 }
 
@@ -68,16 +71,20 @@ bool pp_add(const char *exec_path, char *const exec_args[], ProcessPipeline *pp)
 
         execvp(exec_path, exec_args);
 
-        perror("Process Pipeline child");
+        perror("Failed to start Process Pipeline child");
         _exit(1);
     }
 
     close(pipefd[1]);
-
+    if(pp->pid_arr_len!=0)
+        close(pp->reader_pipe);
     pp->reader_pipe = pipefd[0];
 
     pp->pid_arr[pp->pid_arr_len] = pid;
     ++pp->pid_arr_len;
+
+    if(pp->pid_arr_len == pp->pid_arr_size)
+        close(pipefd[0]);
 
     return true;
 }
@@ -106,33 +113,33 @@ int pp_check_end_num(ProcessPipeline *pp){
     return pp->end_num;
 }
 
-int pp_get_process_num(ProcessPipeline *pp){
+int pp_get_len(ProcessPipeline *pp){
     return pp->pid_arr_len;
 }
 
 //grep -v ˆ# /etc/passwd | cut -f7 -d: | uniq | wc -l
 
 
-int main(int argc, char *argv[]){
+// int main(int argc, char *argv[]){
     
-    ProcessPipeline *pp = pp_new(4, STDIN_FILENO, STDOUT_FILENO);
+//     ProcessPipeline *pp = pp_new(4, STDIN_FILENO, STDOUT_FILENO);
 
 
-    assert(pp_add("grep", (char*[]){"grep", "-v", "^#", "/etc/passwd", 0}, pp));
+//     assert(pp_add("grep", (char*[]){"grep", "-v", "^#", "/etc/passwd", 0}, pp));
 
-    assert(pp_add("cut", (char*[]){"cut", "-f7", "-d:", 0}, pp));
+//     assert(pp_add("cut", (char*[]){"cut", "-f7", "-d:", 0}, pp));
 
-    assert(pp_add("uniq", (char*[]){"uniq", 0}, pp));
+//     assert(pp_add("uniq", (char*[]){"uniq", 0}, pp));
 
-    assert(pp_add("wc", (char*[]){"wc", "-l", 0}, pp));
+//     assert(pp_add("wc", (char*[]){"wc", "-l", 0}, pp));
 
-    // printf("exit:%d\n", pp_wait_check_all(pp));
+//     // printf("exit:%d\n", pp_wait_check_all(pp));
 
-    size_t pp_num = pp_get_process_num(pp), n=0;
-    while((n=pp_check_end_num(pp))<pp_num);
-    printf("end num:%ld\n",n);
-    pp_free(pp);
+//     size_t pp_num = pp_get_process_num(pp), n=0;
+//     while((n=pp_check_end_num(pp))<pp_num);
+//     printf("end num:%ld\n",n);
+//     pp_free(pp);
     
 
-    return 0;
-}
+//     return 0;
+// }

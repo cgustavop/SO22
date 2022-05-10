@@ -10,6 +10,7 @@ typedef struct processPipeline ProcessPipeline;
 // through added processes
 ProcessPipeline *pp_new(int process_num, int input_fd, int output_fd);
 
+// sends SIGTERM to children then frees struct
 void pp_free(ProcessPipeline *pp);
 
 // Forks and adds a process to the pipeline
@@ -22,7 +23,7 @@ bool pp_wait_check_all(ProcessPipeline *pp);
 // Returns number of finished processes or -1 if child returned non zero
 int pp_check_end_num(ProcessPipeline *pp);
 
-int pp_get_process_num(ProcessPipeline *pp);
+int pp_get_len(ProcessPipeline *pp);
 
 
 #endif
