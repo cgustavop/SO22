@@ -107,7 +107,7 @@ int create_server_to_client_fifo(int client_pid){
     }
     fifo_fd = open(SERVER_TO_CLIENT_FIFO, O_WRONLY | O_NONBLOCK);
     if(fifo_fd == -1){ 
-        perror("Failed opening FIFO.");
+        perror("\nFailed opening FIFO. ");
         server_exit = true;
     }else printf("FIFO created.\n");
 
