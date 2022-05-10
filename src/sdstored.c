@@ -148,16 +148,14 @@ int open_server_to_client_fifo(Request *rq){
     return fd;
 }
 
+// returns false on error
 bool request_loop(int fifo_fd){
 
-    while(pq_is_empty(executing_prcs_queue) && pq_is_empty(requests_queue) && !server_exit){
+    while(!server_exit){
         struct pollfd pfd = {
             .events = POLLIN,
             .fd = fifo_fd,
         };
-        if(poll(&pfd, 1, -1)==-1){
-            perror("poll");
-        }
         int n=0;
         Request hdr;
         Request *p_req=NULL;
@@ -167,11 +165,21 @@ bool request_loop(int fifo_fd){
         while((n=read(fifo_fd, read_buf, read_buf_size))!=0){
             if(n==-1){
                 if(errno==EAGAIN || errno==EWOULDBLOCK){
-                    poll(&pfd, 1, 20);
-                    continue;
+                    if(read_buf_size!=sizeof(Request) && read_buf_size!=sizeof(ProcessRequestData)){
+                        poll(&pfd, 1, 20);
+                    }
+                    else{
+                        if(pq_is_empty(executing_prcs_queue) && pq_is_empty(requests_queue)){
+                            if(poll(&pfd, 1, -1)==-1){
+                                perror("request loop poll error");
+                            }
+                        }
+                        else
+                            return true;                        
+                    }
                 }
                 else{
-                    perror("Client -> Server Fifo");
+                    perror("Client -> Server Fifo Error");
                     free(p_req);
                     return false;
                 }
@@ -263,7 +271,7 @@ void prcs_free(Process prcs){
 
 void check_executing_prcs(){
     if(!pq_is_empty(executing_prcs_queue)){
-        usleep(20*1000); // 50ms
+        usleep(10*1000); // 10ms
         printf("handling execution queue\n");
         Process prcs;
 
@@ -336,8 +344,9 @@ int main(int argc, char* argv[]){
     if(mkfifo(CLIENT_TO_SERVER_FIFO, 0666)!=0){
         perror("mkfifo");
     }
-    int fd = open(CLIENT_TO_SERVER_FIFO, O_RDONLY | O_NONBLOCK);
-    if(fd == -1){ 
+    int fifo_fd = open(CLIENT_TO_SERVER_FIFO, O_RDONLY | O_NONBLOCK);
+    int fifo_fd_wr = open(CLIENT_TO_SERVER_FIFO, O_WRONLY | O_NONBLOCK); // keep fifo alive
+    if(fifo_fd == -1){ 
         perror("Failed opening FIFO.");
         server_exit = true;
     }else printf("FIFO created.\n");
@@ -350,14 +359,15 @@ int main(int argc, char* argv[]){
 
     while(!server_exit){
         printf("Searching for requests...\n");
-        request_loop(fd);
+        request_loop(fifo_fd);
 
         check_executing_prcs();
 
         handle_new_requests();
     }
 
-    close(fd);
+    close(fifo_fd);
+    close(fifo_fd_wr);
     return 0;
 }
 
