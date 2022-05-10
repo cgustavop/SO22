@@ -14,11 +14,12 @@
 
 static_assert(sizeof(Request)+sizeof(ProcessRequestData)<=PIPE_BUF, "Request's too big. Non atomic writes");
 
+char SERVER_TO_CLIENT_FIFO[25];
+
  /* Guarda os file descriptors dos FIFOs.
     fd[0] para escrita
     fd[1] para leitura */
-int fd[2]; 
-
+int fd[2];
  /* Abre o FIFO criado pelo servidor em modo escrita para poder enviar requests para o servidor.
     Coloca o file descriptor no índice 0 do array de file descriptors relativo à escrita.
     Retorna 1 em caso de insucesso ao abrir o FIFO e 0 em caso de sucesso. */
@@ -27,7 +28,7 @@ int open_client_to_server_fifo(){
     printf("[DEBUG] Opening client to server fifo...\n");
     fd[0] = open(CLIENT_TO_SERVER_FIFO, O_WRONLY);
     if(fd[0] == -1) return 1; //falhou ligação
-    printf("[DEBUG] Connection established\n");
+    //printf("[DEBUG] Connection established\n");
     
     return 0;
 }
@@ -37,15 +38,15 @@ int open_client_to_server_fifo(){
     Retorna 1 em caso de insucesso ao abrir o FIFO e 0 em caso de sucesso. */
 int open_server_to_client_fifo(){
 
-    fprintf(stderr,"[DEBUG] Opening server to client fifo...\n");
-    char SERVER_TO_CLIENT_FIFO[25]; //path específico para este client
     snprintf(SERVER_TO_CLIENT_FIFO, 25, "server_to_client_fifo_%d", getpid());
     fprintf(stderr,"[DEBUG] FIFO path: %s\n", SERVER_TO_CLIENT_FIFO);
-    while((fd[0] = open(SERVER_TO_CLIENT_FIFO, O_RDONLY)) == -1){
+    
+    while((fd[1] = open(SERVER_TO_CLIENT_FIFO, O_RDONLY)) == -1){
+        sleep(1);
         fprintf(stderr,"[DEBUG] Trying to connect to server\n");
     }
-    //if(fd[0] == -1) return 1; //falhou ligação
-    fprintf(stderr,"[DEBUG] Connection established\n");
+    //if(fd[1] == -1) return 1; //falhou ligação
+    //fprintf(stderr,"[DEBUG] Connection established\n");
     
     return 0;
 }
@@ -92,9 +93,9 @@ void create_status_request(Request *req){
  /* Envia uma request de status ao servidor através do respetivo FIFO. */
 int send_status_request(Request *req){
 
-    printf("[DEBUG] Sending status request\n");
+    //printf("[DEBUG] Sending status request\n");
     write(fd[0], req, sizeof(Request));
-    printf("[DEBUG] Request sent.\n");
+    printf("[DEBUG] Status request sent.\n");
     
     return 0;
 }
@@ -120,35 +121,39 @@ ssize_t readln(int fd, char *buf, size_t size){
  /* Leitura e escrita para o STDOUT da resposta do servidor a uma request. */
 int get_response(){
 
-    if(open_client_to_server_fifo() == 1){
+    if(open_server_to_client_fifo() == 1){
         return 1;
     }
 
     int n;
     Message message;
 
-    while((n=read(fd[0], &message, sizeof(Message)))!=0){
+    while((n=read(fd[1], &message, sizeof(Message)))!=0){
             if(n==-1){
                 if(errno==EAGAIN || errno==EWOULDBLOCK){
                     continue;
                 }
                 else{
-                    perror("Client -> Server Fifo");
+                    perror("[CLIENT->SERVER FIFO]");
                     return 1;
                 }
             }
             else if(message.type==MSG_STRING){
-                fprintf(stderr, "\nreceived status response:\n");
+                //fprintf(stderr, "[DEBUG] Status response received!");
                 int len = message.len;
                 char data[len];
-                read(fd[0], &data, sizeof(char)*len);
+                read(fd[1], &data, sizeof(char)*len);
                 write(1,data,sizeof(char)*len);
-                
+                break;
                 
             }else{
                 fprintf(stderr, "received\n");
             }
-        }
+    }
+
+    close(fd[0]);
+    close(fd[1]);
+    unlink(SERVER_TO_CLIENT_FIFO);
     return 0;
 }
  /* Pedido de status ao servidor. 
@@ -212,7 +217,8 @@ int main(int argc, char* argv[]){ //./sdstore proc-file -p prioridade samples/fi
 
 
         } else if(strcmp(argv[1], "status") == 0){
-            if(!get_status(req)) perror("Unable to get status.");
+            open_client_to_server_fifo(); 
+            get_status(req);
         }
     }else{
         fprintf(stderr, "[DEBUG] wrong arg count\n");

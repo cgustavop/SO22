@@ -18,20 +18,9 @@
 
 static_assert(sizeof(Request)+sizeof(ProcessRequestData)<=PIPE_BUF, "requests too big, non atomic writes");
 
-enum transformations {nop, bcompress, bdecompress, gcompress, gdecompress, encrypt, decrypt};
-#define TOTAL_TRANSFORMATIONS_NUMBER 6
-
-
-typedef struct transformation {
-    char name[16];
-    int max_inst;
-    int running_inst;
-} Transformation;
-
-
 int server_pid; //para guardar o pid do servidor
 char *transf_folder; //onde será guardado o path da pasta onde se encontram os executáveis das transformações
-Transformation transfs[TOTAL_TRANSFORMATIONS_NUMBER]; //lista das várias transformações
+Transformation transfs[TOTAL_TRANSFORMATIONS]; //lista das várias transformações
 bool server_exit=false;
 
 PriorityQueue *requests_queue;
@@ -78,7 +67,7 @@ void sigterm_handler(int signum){
 int set_config(char* config_file_path){ //lê o config file linha a linha e define parâmetros para as várias transformações
     int fd = openat(AT_FDCWD, config_file_path, O_RDONLY);
 
-    printf("%s\n", config_file_path);
+    //printf("%s\n", config_file_path);
     if(fd == -1) return 1;
     char buf[64];
 
@@ -103,6 +92,41 @@ int set_config(char* config_file_path){ //lê o config file linha a linha e defi
     close(fd);
 
     return 0;
+}
+int create_server_to_client_fifo(int client_pid){
+    int fifo_fd;
+    //int length = snprintf( NULL, 0, "%d", client_pid );
+    char SERVER_TO_CLIENT_FIFO[25]; //path específico para este client
+    snprintf(SERVER_TO_CLIENT_FIFO, 25, "server_to_client_fifo_%d", client_pid);
+
+    //fprintf(stderr,"\nOpening server to client fifo...\n");
+    fprintf(stderr,"\n");
+    fprintf(stderr,SERVER_TO_CLIENT_FIFO);
+    if(mkfifo(SERVER_TO_CLIENT_FIFO, 0666)!=0){
+        perror("mkfifo");
+    }
+    fifo_fd = open(SERVER_TO_CLIENT_FIFO, O_WRONLY | O_NONBLOCK);
+    if(fifo_fd == -1){ 
+        perror("Failed opening FIFO.");
+        server_exit = true;
+    }else printf("FIFO created.\n");
+
+    return fifo_fd;
+}
+
+void send_response(int client_pid){
+    char data[13] = "olá cliente";
+    
+    char res_buf[sizeof(Message)+(sizeof(char)*13)];
+    Message *message = (Message*)res_buf;
+
+    message->type = MSG_STRING;
+    message->len = 13;
+    //message->data[25] = "status request recebido";
+    memcpy(message->data, data, (sizeof(char)*13));
+
+    int client_fifo_fd = create_server_to_client_fifo(client_pid);
+    write(client_fifo_fd, message, sizeof(res_buf));
 }
 
 
@@ -134,11 +158,15 @@ bool request_loop(int fifo_fd){
                 read_buf += n;
             }
             else if(hdr.type==STATUS_REQUEST){
+                /*
                 Request *rq = malloc(sizeof(Request));
                 *rq = hdr;
                 pq_enqueue(&rq, requests_queue);
                 read_buf = (char*)&hdr;
                 read_buf_size = sizeof(Request);
+                */
+                fprintf(stderr,"[DEBUG] Recebi uma status request");
+                send_response(hdr.client_pid);
             }
             else if(hdr.type==PROCESS_REQUEST){
                 Request *p_rq;
@@ -178,7 +206,7 @@ int main(int argc, char* argv[]){
         return 1;
     }
 
-    printf("Opening client to server fifo...\n");
+    //printf("Opening client to server fifo...\n");
     if(mkfifo(CLIENT_TO_SERVER_FIFO, 0666)!=0){
         perror("mkfifo");
     }
@@ -205,17 +233,3 @@ int main(int argc, char* argv[]){
 
     return 0;
 }
-
-/*  EXEMPLO ENVIO DE STATUS
-
-task #3: proc-file 0 /home/user/samples/file-c file-c-output nop bcompress
-task #5: proc-file 1 samples/file-a file-a-output bcompress nop gcompress encrypt nop
-task #8: proc-file 1 file-b-output path/to/dir/new-file-b decrypt gdecompress
-transf nop: 3/3 (running/max)
-transf bcompress: 2/4 (running/max)
-transf bdecompress: 1/4 (running/max)
-transf gcompress: 1/2 (running/max)
-transf gdecompress: 1/2 (running/max)
-transf encrypt: 1/2 (running/max)
-transf decrypt: 1/2 (running/max)
-*/  
