@@ -261,6 +261,61 @@ void prcs_free(Process prcs){
     free(prcs.req);
 }
 
+void check_executing_prcs(){
+    if(!pq_is_empty(executing_prcs_queue)){
+        usleep(20*1000); // 50ms
+        printf("handling execution queue\n");
+        Process prcs;
+
+        while(pq_dequeue(&prcs, executing_prcs_queue)){
+            int end_num = pp_check_end_num(prcs.pp);
+            for(int i=prcs.completed_num;i<end_num;++i){
+                Transformations tr;
+                string_to_transformation(prcs.req->data->transf_names[i], &tr);
+                transfs[tr].running_inst--;
+            }
+            prcs.completed_num = end_num;
+            if(end_num==prcs.req->data->transf_num){
+                printf("prcs done\n");
+                prcs_free(prcs);
+            }
+            else{
+                if(pp_get_len(prcs.pp)<prcs.req->data->transf_num)
+                    prcs_add_transf(&prcs);
+                
+                if(!prcs.is_valid)
+                    prcs_free(prcs);
+                
+                pq_enqueue(&prcs, executing_prcs_queue_swap);
+            }
+        }
+        PriorityQueue *pq = executing_prcs_queue;
+        executing_prcs_queue = executing_prcs_queue_swap;
+        executing_prcs_queue_swap = pq;
+    }
+}
+
+void handle_new_requests(){
+    Request *rq;
+    while(pq_dequeue(&rq, requests_queue)){
+        printf("handling new requests\n");
+        if(rq->type==PROCESS_REQUEST){
+            // send executing
+            Process prcs = prcs_new(rq);
+
+            prcs_add_transf(&prcs);
+
+            if(prcs.is_valid){
+                pq_enqueue(&prcs, executing_prcs_queue);
+            }
+            else{
+                // send failure
+                prcs_free(prcs);
+            }
+        }
+    }
+}
+
 int main(int argc, char* argv[]){
 
     if(argc<3){
@@ -297,57 +352,9 @@ int main(int argc, char* argv[]){
         printf("Searching for requests...\n");
         request_loop(fd);
 
-        // handle executing prcs
-        if(!pq_is_empty(executing_prcs_queue)){
-            usleep(20*1000); // 50ms
-            printf("handling execution queue\n");
-            Process prcs;
+        check_executing_prcs();
 
-            while(pq_dequeue(&prcs, executing_prcs_queue)){
-                int end_num = pp_check_end_num(prcs.pp);
-                for(int i=prcs.completed_num;i<end_num;++i){
-                    Transformations tr;
-                    string_to_transformation(prcs.req->data->transf_names[i], &tr);
-                    transfs[tr].running_inst--;
-                }
-                prcs.completed_num = end_num;
-                if(end_num==prcs.req->data->transf_num){
-                    printf("prcs done\n");
-                    prcs_free(prcs);
-                }
-                else{
-                    if(pp_get_len(prcs.pp)<prcs.req->data->transf_num)
-                        prcs_add_transf(&prcs);
-                    
-                    if(!prcs.is_valid)
-                        prcs_free(prcs);
-                    
-                    pq_enqueue(&prcs, executing_prcs_queue_swap);
-                }
-            }
-            PriorityQueue *pq = executing_prcs_queue;
-            executing_prcs_queue = executing_prcs_queue_swap;
-            executing_prcs_queue_swap = pq;
-        }
-
-        Request *rq;
-        while(pq_dequeue(&rq, requests_queue)){
-            printf("handling new requests\n");
-            if(rq->type==PROCESS_REQUEST){
-                // send executing
-                Process prcs = prcs_new(rq);
-
-                prcs_add_transf(&prcs);
-
-                if(prcs.is_valid){
-                    pq_enqueue(&prcs, executing_prcs_queue);
-                }
-                else{
-                    // send failure
-                    prcs_free(prcs);
-                }
-            }
-        }
+        handle_new_requests();
     }
 
     close(fd);
