@@ -151,73 +151,71 @@ int open_server_to_client_fifo(Request *rq){
 // returns false on error
 bool request_loop(int fifo_fd){
 
-    while(!server_exit){
-        struct pollfd pfd = {
-            .events = POLLIN,
-            .fd = fifo_fd,
-        };
-        int n=0;
-        Request hdr;
-        Request *p_req=NULL;
-        char *read_buf = (char*)&hdr;
-        ssize_t read_buf_size = sizeof(Request);
+    struct pollfd pfd = {
+        .events = POLLIN,
+        .fd = fifo_fd,
+    };
+    int n=0;
+    Request hdr;
+    Request *p_req=NULL;
+    char *read_buf = (char*)&hdr;
+    ssize_t read_buf_size = sizeof(Request);
 
-        while((n=read(fifo_fd, read_buf, read_buf_size))!=0){
-            if(n==-1){
-                if(errno==EAGAIN || errno==EWOULDBLOCK){
-                    if(read_buf_size!=sizeof(Request) && read_buf_size!=sizeof(ProcessRequestData)){
-                        poll(&pfd, 1, 20);
-                    }
-                    else{
-                        if(pq_is_empty(executing_prcs_queue) && pq_is_empty(requests_queue)){
-                            if(poll(&pfd, 1, -1)==-1){
-                                perror("request loop poll error");
-                            }
+    while(!server_exit && (n=read(fifo_fd, read_buf, read_buf_size))!=0){
+        if(n==-1){
+            if(errno==EAGAIN || errno==EWOULDBLOCK){
+                if(read_buf_size!=sizeof(Request) && read_buf_size!=sizeof(ProcessRequestData)){
+                    poll(&pfd, 1, 20);
+                }
+                else{
+                    if(!server_exit && pq_is_empty(executing_prcs_queue) && pq_is_empty(requests_queue)){
+                        if(poll(&pfd, 1, -1)==-1){
+                            perror("request loop poll error");
                         }
-                        else
-                            return true;                        
                     }
+                    else
+                        return true;                        
+                }
+            }
+            else{
+                perror("Client -> Server Fifo Error");
+                free(p_req);
+                return false;
+            }
+        }
+        else if(n!=read_buf_size){
+            read_buf_size = read_buf_size-n;
+            read_buf += n;
+        }
+        else if(hdr.type==STATUS_REQUEST){
+            Request *rq = malloc(sizeof(Request));
+            *rq = hdr;
+            pq_enqueue(&rq, requests_queue);
+            read_buf = (char*)&hdr;
+            read_buf_size = sizeof(Request);
+        }
+        else if(hdr.type==PROCESS_REQUEST){
+            if(p_req==NULL){
+                p_req = calloc(1, sizeof(Request)+sizeof(ProcessRequestData));
+                *p_req = hdr;
+                read_buf = (char*)p_req->data;
+                read_buf_size = sizeof(ProcessRequestData);
+            }
+            else{
+                int fd;
+                if((fd=open_server_to_client_fifo(p_req))!=-1){
+                    p_req->pipe_fd = fd;
+                    p_req->num = request_counter++;
+                    pq_enqueue(&p_req, requests_queue);
+                    read_buf = (char*)&hdr;
+                    read_buf_size = sizeof(Request);
+                    p_req = NULL;
+                    printf("pushed new request\n");
+                    // mandar pending
                 }
                 else{
-                    perror("Client -> Server Fifo Error");
+                    printf("failed to open server to client fifo\n");
                     free(p_req);
-                    return false;
-                }
-            }
-            else if(n!=read_buf_size){
-                read_buf_size = read_buf_size-n;
-                read_buf += n;
-            }
-            else if(hdr.type==STATUS_REQUEST){
-                Request *rq = malloc(sizeof(Request));
-                *rq = hdr;
-                pq_enqueue(&rq, requests_queue);
-                read_buf = (char*)&hdr;
-                read_buf_size = sizeof(Request);
-            }
-            else if(hdr.type==PROCESS_REQUEST){
-                if(p_req==NULL){
-                    p_req = calloc(1, sizeof(Request)+sizeof(ProcessRequestData));
-                    *p_req = hdr;
-                    read_buf = (char*)p_req->data;
-                    read_buf_size = sizeof(ProcessRequestData);
-                }
-                else{
-                    int fd;
-                    if((fd=open_server_to_client_fifo(p_req))!=-1){
-                        p_req->pipe_fd = fd;
-                        p_req->num = request_counter++;
-                        pq_enqueue(&p_req, requests_queue);
-                        read_buf = (char*)&hdr;
-                        read_buf_size = sizeof(Request);
-                        p_req = NULL;
-                        printf("pushed new request\n");
-                        // mandar pending
-                    }
-                    else{
-                        printf("failed to open server to client fifo\n");
-                        free(p_req);
-                    }
                 }
             }
         }
