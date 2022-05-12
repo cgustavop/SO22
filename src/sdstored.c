@@ -11,10 +11,10 @@
 #include <errno.h>
 #include <assert.h>
 #include <poll.h>
+#include <math.h>
 
 #include "request.h"
 #include "priority_queue.h"
-
 
 static_assert(sizeof(Request)+sizeof(ProcessRequestData)<=PIPE_BUF, "requests too big, non atomic writes");
 
@@ -93,40 +93,80 @@ int set_config(char* config_file_path){ //lê o config file linha a linha e defi
 
     return 0;
 }
-int create_server_to_client_fifo(int client_pid){
-    int fifo_fd;
-    //int length = snprintf( NULL, 0, "%d", client_pid );
-    char SERVER_TO_CLIENT_FIFO[25]; //path específico para este client
-    snprintf(SERVER_TO_CLIENT_FIFO, 25, "server_to_client_fifo_%d", client_pid);
 
-    //fprintf(stderr,"\nOpening server to client fifo...\n");
-    fprintf(stderr,"\n");
-    fprintf(stderr,SERVER_TO_CLIENT_FIFO);
-    if(mkfifo(SERVER_TO_CLIENT_FIFO, 0666)!=0){
-        perror("mkfifo");
+int open_server_to_client_fifo(int client_pid){
+    int fd;
+    int str_len = 23 + NO_DIGITS(client_pid);
+    char SERVER_TO_CLIENT_FIFO[str_len];
+    snprintf(SERVER_TO_CLIENT_FIFO, str_len, "server_to_client_fifo_%d", client_pid);
+    fprintf(stderr,"[DEBUG] FIFO path: %s\n", SERVER_TO_CLIENT_FIFO);
+    
+    while((fd = open(SERVER_TO_CLIENT_FIFO, O_WRONLY)) == -1){
+        sleep(1);
+        fprintf(stderr,"[DEBUG] Trying to connect to server\n");
     }
-    fifo_fd = open(SERVER_TO_CLIENT_FIFO, O_WRONLY | O_NONBLOCK);
-    if(fifo_fd == -1){ 
-        perror("\nFailed opening FIFO. ");
-        server_exit = true;
-    }else printf("FIFO created.\n");
-
-    return fifo_fd;
+    
+    return 0;
+}
+int get_status(char *response){
+    int res_len = 6;
+    char teste[6] = "teste";
+    memcpy(response, teste, res_len);
+    return res_len;
 }
 
-void send_response(int client_pid){
-    char data[13] = "olá cliente";
+//int fstat(int fd, struct stat *buf);
+void get_IO_bytes_info(char *response, int input_fd, int output_fd){
+    struct stat *input_stat = malloc(sizeof(struct stat));
+    struct stat *output_stat = malloc(sizeof(struct stat));
+
+    fstat(input_fd, input_stat);
+    fstat(output_fd, output_stat);
+
+    int input_size = input_stat->st_size;
+    int output_size = output_stat->st_size;
+
+    int res_len = 32 + NO_DIGITS(input_size) + NO_DIGITS(output_size);
+    response = malloc(sizeof(char)*res_len);
+
+    snprintf(response, res_len, "(bytes-input: %d, bytes-output: %d)", input_size, output_size);
+}
+
+void send_response(int client_pid, char response[], int response_len){
     
-    char res_buf[sizeof(Message)+(sizeof(char)*13)];
+    char res_buf[sizeof(Message)+(sizeof(char)*response_len)];
     Message *message = (Message*)res_buf;
 
-    message->type = MSG_STRING;
-    message->len = 13;
+    message->len = response_len;
     //message->data[25] = "status request recebido";
-    memcpy(message->data, data, (sizeof(char)*13));
+    memcpy(message->data, response, (sizeof(char)*response_len));
+    int client_fifo_fd = open_server_to_client_fifo(client_pid); //TODO cliente cria o fifo e não o servidor
 
-    int client_fifo_fd = create_server_to_client_fifo(client_pid);
     write(client_fifo_fd, message, sizeof(res_buf));
+}
+
+void send_proc_status(int input_fd,int output_fd,int client_pid, Status status){
+    int res_len = 0;
+    switch(status){
+        case PENDING:
+            res_len = 8;
+            send_response(client_pid, "pending", res_len);
+            break;
+        
+        case PROCESSING:
+            res_len = 11;
+            send_response(client_pid, "processing", res_len);
+            break;
+        case CONCLUDED:
+            res_len = 11;
+            char *response = strndup("concluded ", res_len);
+            char *bytes = NULL;
+            get_IO_bytes_info(bytes, input_fd, output_fd);
+            send_response(client_pid, response, res_len);
+            free(response);
+
+            break;
+    }
 }
 
 
@@ -158,15 +198,11 @@ bool request_loop(int fifo_fd){
                 read_buf += n;
             }
             else if(hdr.type==STATUS_REQUEST){
-                /*
-                Request *rq = malloc(sizeof(Request));
-                *rq = hdr;
-                pq_enqueue(&rq, requests_queue);
-                read_buf = (char*)&hdr;
-                read_buf_size = sizeof(Request);
-                */
                 fprintf(stderr,"[DEBUG] Recebi uma status request");
-                send_response(hdr.client_pid);
+                char *response = NULL;
+                int res_len = get_status(response);
+                send_response(hdr.client_pid, response, res_len);
+                free(response);
             }
             else if(hdr.type==PROCESS_REQUEST){
                 Request *p_rq;
