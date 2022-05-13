@@ -22,6 +22,8 @@ char SERVER_TO_CLIENT_FIFO[25];
     fd[0] para escrita
     fd[1] para leitura */
 int fd[2];
+
+char server_to_client_fifo[84];
  /* Abre o FIFO criado pelo servidor em modo escrita para poder enviar requests para o servidor.
     Coloca o file descriptor no índice 0 do array de file descriptors relativo à escrita.
     Retorna 1 em caso de insucesso ao abrir o FIFO e 0 em caso de sucesso. */
@@ -36,32 +38,41 @@ int open_client_to_server_fifo(){
 }
 int create_server_to_client_fifo(){
 
-    int str_len = 23 + NO_DIGITS(getpid());
-    char SERVER_TO_CLIENT_FIFO[str_len];
-    snprintf(SERVER_TO_CLIENT_FIFO, str_len, "server_to_client_fifo_%d", getpid());
-
-    //fprintf(stderr,"\nOpening server to client fifo...\n");
-    fprintf(stderr,"\n");
-    fprintf(stderr,SERVER_TO_CLIENT_FIFO);
-    if(mkfifo(SERVER_TO_CLIENT_FIFO, 0666)!=0){
-        perror("mkfifo");
-        return 1;
+    int str_len = 29 + NO_DIGITS(getpid());
+    // char server_to_client_fifo[str_len];
+    int n = snprintf(server_to_client_fifo, str_len, SERVER_TO_CLIENT_FIFO_TEMPL"%d", getpid());
+    if(n>0 && n<=str_len){
+        //fprintf(stderr,"\nOpening server to client fifo...\n");
+        fprintf(stderr,"\n");
+        fprintf(stderr,"%s", server_to_client_fifo);
+        if(mkfifo(server_to_client_fifo, 0666)!=0){
+            perror("error making fifo");
+            return 1;
+        }
     }
-    fd[1] = open(SERVER_TO_CLIENT_FIFO, O_RDONLY);
+    else
+        return 1;
+    
+    return 0;
+}
+
+int open_server_to_client_fifo(){
+    fd[1] = open(server_to_client_fifo, O_RDONLY);
     if(fd[1] == -1){ 
         perror("\nFailed opening FIFO. ");
         return 1;
-    }else printf("FIFO created.\n");
-    
+    }else printf("FIFO opened.\n");
+
     return 0;
 }
  /* Envia uma request de processamento de um ficheiro ao servidor através do respetivo FIFO. */
 int send_process_request(Request *request){
     
     printf("[DEBUG] Sending request\n");
-    if(write(fd[0], request, sizeof(Request)+sizeof(ProcessRequestData)) == 0) return 1;
+    if(write(fd[0], request, sizeof(Request)+sizeof(ProcessRequestData)) <= 0) return 1;
     printf("[DEBUG] Request sent.\n");
 
+    close(fd[0]);
     return 0; 
 }
  /* Preenche os dados relativos a uma request de processamento de um ficheiro.
@@ -78,8 +89,8 @@ void create_process_request(int priority, char** execs, int total_num_transfs, c
     }
     char *inp = realpath(input_path, NULL);
     char *outp = realpath(output_path, NULL);
-    strncpy(req_data->input, inp, strlen(inp));
-    strncpy(req_data->output, outp, strlen(outp));
+    strncpy(req_data->input, inp, strlen(inp)+1);
+    strncpy(req_data->output, outp, strlen(outp)+1);
     free(inp);
     free(outp);
 
@@ -126,31 +137,27 @@ ssize_t readln(int fd, char *buf, size_t size){
  /* Leitura e escrita para o STDOUT da resposta do servidor a uma request. */
 int get_response(){
 
-    if(create_server_to_client_fifo() == 1){
-        return 1;
-    }
-
     int n;
     Message message;
 
     while((n=read(fd[1], &message, sizeof(Message)))!=0){
-            if(n==-1){
-                if(errno==EAGAIN || errno==EWOULDBLOCK){
-                    continue;
-                }
-                else{
-                    perror("[CLIENT->SERVER FIFO]");
-                    return 1;
-                }
+        if(n==-1){
+            if(errno==EAGAIN || errno==EWOULDBLOCK){
+                continue;
             }
             else{
-                //fprintf(stderr, "[DEBUG] Status response received!");
-                int len = message.len;
-                char data[len];
-                read(fd[1], &data, sizeof(char)*len);
-                write(1,data,sizeof(char)*len);
-                break;
+                perror("[CLIENT->SERVER FIFO]");
+                return 1;
             }
+        }
+        else{
+            //fprintf(stderr, "[DEBUG] Status response received!");
+            int len = message.len;
+            char data[len];
+            read(fd[1], &data, sizeof(char)*len);
+            write(1,data,sizeof(char)*len);
+            break;
+        }
     }
 
     return 0;
@@ -196,8 +203,13 @@ int main(int argc, char* argv[]){ //./sdstore proc-file -p prioridade samples/fi
                     return 1;
                 }
                 open_client_to_server_fifo(); 
+                if(create_server_to_client_fifo()){
+                    perror("Failed to create or open server to client fifo");
+                    return 1;
+                }
                 create_process_request(atoi(argv[3]), execs, total_num_transfs, argv[4], argv[5], req);
-                if(!send_process_request(req)) perror("Unable to make request.");
+                if(send_process_request(req)) perror("Unable to make request.");
+                open_server_to_client_fifo();
                 get_response();
                 terminate_prog();
             } else{
@@ -215,12 +227,16 @@ int main(int argc, char* argv[]){ //./sdstore proc-file -p prioridade samples/fi
                     return 1;
                 }
                 open_client_to_server_fifo();
+                if(create_server_to_client_fifo()){
+                    perror("Failed to create or open server to client fifo");
+                    return 1;
+                }
                 create_process_request(0, execs, total_num_transfs, argv[2], argv[3], req);
-                if(!send_process_request(req)) perror("Unable to make request.");
-                if(!get_response()) perror("Unable to get response.");
+                if(send_process_request(req)) perror("Unable to make request.");
+                open_server_to_client_fifo();
+                if(get_response()) perror("Unable to get response.");
                 terminate_prog();
             }
-
 
         } else if(strcmp(argv[1], "status") == 0){
             open_client_to_server_fifo();

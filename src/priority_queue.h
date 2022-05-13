@@ -26,4 +26,13 @@ bool pq_peek(void* data_out, PriorityQueue *pq);
 
 bool pq_is_empty(PriorityQueue *pq);
 
+void *pq_get_arr(size_t *arr_len_out, PriorityQueue *pq);
+
+void *pq_iter_start(PriorityQueue *pq);
+
+void *pq_iter_end(PriorityQueue *pq);
+
+#define PQ_FOREACH(var_name, type, prio_queue) \
+    for(type *var_name=pq_iter_start(prio_queue);var_name<(type*)pq_iter_end(prio_queue);++var_name)
+
 #endif

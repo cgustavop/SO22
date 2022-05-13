@@ -1,12 +1,12 @@
 CC = gcc
-CCFLAGS = -g -Wall -Werror -Wextra -pedantic -fsanitize=undefined -fsanitize=address
+CCFLAGS = -g -Wall -Werror -Wextra -pedantic -fsanitize=undefined -fsanitize=address -lm
 
-all: sdstore sdstored
+all: bin/sdstore bin/sdstored
 
-sdstore :  obj/sdstore.o src/request.h 
+bin/sdstore :  obj/sdstore.o 
 	${CC} $^ -o $@ ${CCFLAGS}
 
-sdstored : obj/sdstored.o obj/priority_queue.o src/request.h src/priority_queue.h
+bin/sdstored : obj/sdstored.o obj/priority_queue.o obj/process_pipeline.o
 	${CC} $^ -o $@ ${CCFLAGS}
 
 obj/sdstore.o : src/sdstore.c
@@ -18,10 +18,12 @@ obj/sdstored.o : src/sdstored.c
 obj/priority_queue.o : src/priority_queue.c 
 	${CC} $^ -c -o $@ ${CCFLAGS}
 
+obj/process_pipeline.o : src/process_pipeline.c
+	${CC} $^ -c -o $@ ${CCFLAGS}
+
 clean :
 	@echo "Cleaning..."
-	rm sdstored
-	rm sdstore
+	rm -rf bin/*
 	rm -rf obj/*.o
 	
 
