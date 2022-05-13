@@ -48,6 +48,8 @@ typedef struct processRequestData {
     int transf_num;
     int input_len;
     int output_len;
+    int input_fd;
+    int output_fd;
     int req_fd;
     Status status;
     char transf_names[16][16];

@@ -145,24 +145,26 @@ void send_response(int client_pid, char response[], int response_len){
     write(client_fifo_fd, message, sizeof(res_buf));
 }
 
-void send_proc_status(int input_fd,int output_fd,int client_pid, Status status){
+//void send_proc_status(int input_fd,int output_fd,int client_pid, Status status){
+void send_proc_status(Request req){
     int res_len = 0;
-    switch(status){
+    ProcessRequestData *data = req.data;
+    switch(data->status){
         case PENDING:
             res_len = 8;
-            send_response(client_pid, "pending", res_len);
+            send_response(req.client_pid, "pending", res_len);
             break;
         
         case PROCESSING:
             res_len = 11;
-            send_response(client_pid, "processing", res_len);
+            send_response(req.client_pid, "processing", res_len);
             break;
         case CONCLUDED:
             res_len = 11;
             char *response = strndup("concluded ", res_len);
             char *bytes = NULL;
-            get_IO_bytes_info(bytes, input_fd, output_fd);
-            send_response(client_pid, response, res_len);
+            get_IO_bytes_info(bytes, data->input_fd, data->output_fd);
+            send_response(req.client_pid, response, res_len);
             free(response);
 
             break;
