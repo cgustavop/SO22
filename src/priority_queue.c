@@ -1,3 +1,4 @@
+#include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
@@ -110,6 +111,22 @@ bool pq_is_empty(PriorityQueue *pq){
         return true;
 }
 
+void *pq_get_arr(size_t *arr_len_out, PriorityQueue *pq){
+    *arr_len_out = pq->arr_len;
+    return pq->arr;
+}
+
+void *pq_iter_start(PriorityQueue *pq){
+    return pq->arr;
+}
+
+void *pq_iter_end(PriorityQueue *pq){
+    return pq->arr+(pq->arr_len*pq->data_size);
+}
+
+#define PQ_FOREACH(var_name, type, prio_queue) \
+    for(type *var_name=pq_iter_start(prio_queue);var_name<(type*)pq_iter_end(prio_queue);++var_name)
+
 int int_comparator(void *a, void *b){
     int *na = a, *nb = b;
 
@@ -124,7 +141,7 @@ int int_comparator(void *a, void *b){
 // int main(){
 //     PriorityQueue *pq = pq_new(sizeof(int),int_comparator);
 
-//     int len = 1000;
+//     int len = 10;
 
 //     for(int i=0;i<len;++i){
 //         pq_enqueue(&i, pq);
@@ -136,7 +153,12 @@ int int_comparator(void *a, void *b){
 //     // for(int i=0;i<10;++i){
 //     //     printf("%d ", *(pq->arr+sizeof(int)*i));
 //     // }
-//     // printf("\n\n");
+//     // printf("\n");
+
+//     PQ_FOREACH(iter, int, pq){
+//         printf("%d ", *iter);
+//     }
+//     printf("\n");
 
 //     for(int i=len-1, buf;i>=0;--i){
 //         pq_dequeue(&buf, pq);
