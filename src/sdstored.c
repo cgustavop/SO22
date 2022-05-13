@@ -257,6 +257,7 @@ void prcs_add_transf(Process *prcs){
 void prcs_free(Process prcs){
     close(prcs.inp_fd);
     close(prcs.out_fd);
+    close(prcs.pipe_fd);
     pp_free(prcs.pp);
     free(prcs.req);
 }
@@ -340,6 +341,8 @@ bool request_loop(int fifo_fd){
             int res_len = get_status(response);
             send_response(hdr.client_pid, response, res_len);
             free(response);
+            read_buf = (char*)&hdr;
+            read_buf_size = sizeof(Request);
         }
         else if(hdr.type==PROCESS_REQUEST){
             if(p_req==NULL){
