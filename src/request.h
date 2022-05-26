@@ -4,7 +4,7 @@
 #include "process_pipeline.h"
 #include <math.h>
 
-#define NO_DIGITS(x) (x==0?1:log10(x)+1)
+#define NO_DIGITS(x) (x==0?1:(int)(log10(x)+1))
 #define TOTAL_TRANSFORMATIONS 7
 
 #define PATH_SIZE 1024
@@ -18,6 +18,7 @@ typedef enum MessageType{
 }MessageType;
 
 typedef enum Status{
+    FAILURE,
     PENDING,
     PROCESSING,
     CONCLUDED
@@ -60,6 +61,7 @@ typedef struct request {
 typedef struct process {
     Request *req;
     ProcessPipeline *pp;
+    Status status;
     int inp_fd;
     int out_fd;
     int prcs_num;

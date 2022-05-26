@@ -148,7 +148,7 @@ int get_status(char *response){
 }
 
 //int fstat(int fd, struct stat *buf);
-void get_IO_bytes_info(char *response, int input_fd, int output_fd){
+int get_IO_bytes_info(char *response, int input_fd, int output_fd){
     struct stat *input_stat = malloc(sizeof(struct stat));
     struct stat *output_stat = malloc(sizeof(struct stat));
 
@@ -158,10 +158,12 @@ void get_IO_bytes_info(char *response, int input_fd, int output_fd){
     int input_size = input_stat->st_size;
     int output_size = output_stat->st_size;
 
-    int res_len = 32 + (NO_DIGITS(input_size)) + (NO_DIGITS(output_size));
+    int res_len = 33 + (NO_DIGITS(input_size)) + (NO_DIGITS(output_size));
     response = malloc(sizeof(char)*res_len);
 
-    snprintf(response, res_len, "(bytes-input: %d, bytes-output: %d)", input_size, output_size);
+    snprintf(response, res_len, " (bytes-input: %d, bytes-output: %d)", input_size, output_size);
+
+    return res_len;
 }
 
 void send_response(int client_pid, char response[], int response_len){
@@ -183,6 +185,10 @@ void send_proc_status(Process prcs){
     Request *req = prcs.req;
     ProcessRequestData *data = req->data;
     switch(data->status){
+        case FAILURE:
+            res_len = 31;
+            send_response(req->client_pid, "failed to process your request", res_len);
+            break;
         case PENDING:
             res_len = 8;
             send_response(req->client_pid, "pending", res_len);
@@ -193,13 +199,13 @@ void send_proc_status(Process prcs){
             send_response(req->client_pid, "processing", res_len);
             break;
         case CONCLUDED:
-            res_len = 11;
-            char *response = strndup("concluded ", res_len);
+            res_len = 10;
+            char *response = strndup("concluded", res_len);
             char *bytes = NULL;
-            get_IO_bytes_info(bytes, prcs.inp_fd, prcs.out_fd);
+            res_len += get_IO_bytes_info(bytes, prcs.inp_fd, prcs.out_fd);
+            strcat(response, bytes);
             send_response(req->client_pid, response, res_len);
             free(response);
-
             break;
     }
 }
@@ -357,16 +363,18 @@ bool request_loop(int fifo_fd){
                 if(prcs.is_valid){
                     pq_enqueue(&prcs, executing_prcs_queue);
                     fprintf(stderr, "[DEBUG] executing new process\n");
+                    prcs.status = PENDING;
                 }
                 else{
                     fprintf(stderr, "[DEBUG] rejected new process\n");
-                    // send failure
+                    prcs.status = FAILURE;
+                    send_proc_status(prcs); //failed, request rejeitada
                     prcs_free(prcs);
                 }
                 read_buf = (char*)&hdr;
                 read_buf_size = sizeof(Request);
                 p_req = NULL;
-                // mandar pending
+                send_proc_status(prcs); //pending, foi para a queue
                 
             }
         }
