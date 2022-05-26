@@ -286,8 +286,8 @@ void check_executing_prcs(){
                 
                 if(!prcs.is_valid)
                     prcs_free(prcs);
-                
-                pq_enqueue(&prcs, executing_prcs_queue_swap);
+                else
+                    pq_enqueue(&prcs, executing_prcs_queue_swap);
             }
         }
         PriorityQueue *pq = executing_prcs_queue;
