@@ -139,14 +139,6 @@ int open_server_to_client_fifo(int client_pid){
     return fd;
 }
 
-
-int get_status(char *response){
-    int res_len = 6;
-    char teste[6] = "teste";
-    memcpy(response, teste, res_len);
-    return res_len;
-}
-
 //int fstat(int fd, struct stat *buf);
 int get_IO_bytes_info(char *response, int input_fd, int output_fd){
     struct stat *input_stat = malloc(sizeof(struct stat));
@@ -166,45 +158,42 @@ int get_IO_bytes_info(char *response, int input_fd, int output_fd){
     return res_len;
 }
 
-void send_response(int client_pid, char response[], int response_len){
+void send_response(int pipe_fd, char response[], int response_len){
     
     char res_buf[sizeof(Message)+(sizeof(char)*response_len)];
     Message *message = (Message*)res_buf;
 
     message->len = response_len;
-    //message->data[25] = "status request recebido";
     memcpy(message->data, response, (sizeof(char)*response_len));
-    int client_fifo_fd = open_server_to_client_fifo(client_pid); //TODO cliente cria o fifo e não o servidor
 
-    write(client_fifo_fd, message, sizeof(res_buf));
+    write(pipe_fd, message, sizeof(res_buf));
 }
 
 //void send_proc_status(int input_fd,int output_fd,int client_pid, Status status){
 void send_proc_status(Process prcs){
     int res_len = 0;
-    Request *req = prcs.req;
-    ProcessRequestData *data = req->data;
-    switch(data->status){
+
+    switch(prcs.status){
         case FAILURE:
-            res_len = 31;
-            send_response(req->client_pid, "failed to process your request", res_len);
+            res_len = 32;
+            send_response(prcs.pipe_fd, "failed to process your request\n", res_len);
             break;
         case PENDING:
-            res_len = 8;
-            send_response(req->client_pid, "pending", res_len);
+            res_len = 9;
+            send_response(prcs.pipe_fd, "pending\n", res_len);
             break;
         
         case PROCESSING:
             res_len = 11;
-            send_response(req->client_pid, "processing", res_len);
+            send_response(prcs.pipe_fd, "processing\n", res_len);
             break;
         case CONCLUDED:
-            res_len = 10;
-            char *response = strndup("concluded", res_len);
+            res_len = 11;
+            char *response = strndup("concluded\n", res_len);
             char *bytes = NULL;
             res_len += get_IO_bytes_info(bytes, prcs.inp_fd, prcs.out_fd);
             strcat(response, bytes);
-            send_response(req->client_pid, response, res_len);
+            send_response(prcs.pipe_fd, response, res_len);
             free(response);
             break;
     }
@@ -343,10 +332,11 @@ bool request_loop(int fifo_fd){
         }
         else if(hdr.type==STATUS_REQUEST){
             fprintf(stderr,"[DEBUG] Recebi uma status request");
-            char *response = NULL;
-            int res_len = get_status(response);
-            send_response(hdr.client_pid, response, res_len);
-            free(response);
+            char *response = "yo\n";
+            int pipe_fd = open_server_to_client_fifo(hdr.client_pid);
+            if(pipe_fd!=-1){
+                send_response(pipe_fd, response, 4);
+            }
             read_buf = (char*)&hdr;
             read_buf_size = sizeof(Request);
         }

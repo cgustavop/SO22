@@ -140,24 +140,16 @@ int get_response(){
     int n;
     Message message;
 
-    while((n=read(fd[1], &message, sizeof(Message)))!=0){
-        if(n==-1){
-            if(errno==EAGAIN || errno==EWOULDBLOCK){
-                continue;
-            }
-            else{
-                perror("[CLIENT->SERVER FIFO]");
-                return 1;
-            }
-        }
-        else{
-            //fprintf(stderr, "[DEBUG] Status response received!");
-            int len = message.len;
-            char data[len];
-            read(fd[1], &data, sizeof(char)*len);
-            write(1,data,sizeof(char)*len);
-            break;
-        }
+    if((n=read(fd[1], &message, sizeof(Message)))==-1){
+        perror("[CLIENT->SERVER FIFO]");
+        return 1;
+    }
+    else{
+        //fprintf(stderr, "[DEBUG] Status response received!");
+        int len = message.len;
+        char data[len];
+        read(fd[1], &data, sizeof(char)*len);
+        write(STDOUT_FILENO,data,sizeof(char)*len);
     }
 
     return 0;
@@ -239,8 +231,12 @@ int main(int argc, char* argv[]){ //./sdstore proc-file -p prioridade samples/fi
             }
 
         } else if(strcmp(argv[1], "status") == 0){
+            create_server_to_client_fifo();
+            create_status_request(req);
             open_client_to_server_fifo();
-            get_status(req);
+            send_status_request(req);
+            open_server_to_client_fifo();
+            get_response();
             terminate_prog();
         }
     }else{

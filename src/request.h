@@ -30,12 +30,6 @@ typedef struct Message{
     char data[];
 }Message;
 
-// typedef struct transformation {
-//     char name[16];
-//     int max_inst;
-//     int running_inst;
-// } Transformation;
-
 typedef enum RequestType{
     STATUS_REQUEST,
     PROCESS_REQUEST
@@ -45,7 +39,6 @@ typedef struct processRequestData {
     int transf_num;
     int input_len;
     int output_len;
-    Status status;
     char transf_names[16][16];
     char input[PATH_SIZE];
     char output[PATH_SIZE];
