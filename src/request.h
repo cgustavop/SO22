@@ -1,6 +1,7 @@
 #ifndef __PROCESS_H__
 #define __PROCESS_H__
 
+#include <stdbool.h>
 #include "process_pipeline.h"
 #include <math.h>
 
@@ -25,7 +26,7 @@ typedef enum Status{
 }Status;
 
 typedef struct Message{
-    //MessageType type;
+    bool wait; // wait true, o cliente espera por mais mensagens (vice-versa)
     int len;
     char data[];
 }Message;

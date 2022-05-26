@@ -1,7 +1,10 @@
 CC = gcc
 CCFLAGS = -g -Wall -Werror -Wextra -pedantic -fsanitize=undefined -fsanitize=address -lm
 
-all: bin/sdstore bin/sdstored
+all: bin/sdstore bin/sdstored execs
+
+execs:
+	$(MAKE) -C ./exec/
 
 bin/sdstore :  obj/sdstore.o 
 	${CC} $^ -o $@ ${CCFLAGS}
@@ -25,6 +28,3 @@ clean :
 	@echo "Cleaning..."
 	rm -rf bin/*
 	rm -rf obj/*.o
-	
-
-	

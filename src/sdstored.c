@@ -158,11 +158,12 @@ int get_IO_bytes_info(char *response, int input_fd, int output_fd){
     return res_len;
 }
 
-void send_response(int pipe_fd, char response[], int response_len){
+void send_response(int pipe_fd, char response[], int response_len, bool wait){
     
     char res_buf[sizeof(Message)+(sizeof(char)*response_len)];
     Message *message = (Message*)res_buf;
 
+    message->wait = wait;
     message->len = response_len;
     memcpy(message->data, response, (sizeof(char)*response_len));
 
@@ -176,24 +177,25 @@ void send_proc_status(Process prcs){
     switch(prcs.status){
         case FAILURE:
             res_len = 32;
-            send_response(prcs.pipe_fd, "failed to process your request\n", res_len);
+            send_response(prcs.pipe_fd, "failed to process your request\n", res_len, false);
             break;
         case PENDING:
             res_len = 9;
-            send_response(prcs.pipe_fd, "pending\n", res_len);
+            send_response(prcs.pipe_fd, "pending\n", res_len, true);
             break;
         
         case PROCESSING:
             res_len = 11;
-            send_response(prcs.pipe_fd, "processing\n", res_len);
+            send_response(prcs.pipe_fd, "processing\n", res_len, true);
             break;
         case CONCLUDED:
+            //TODO arranjar o número de bytes lidos e escritos
             res_len = 11;
             char *response = strndup("concluded\n", res_len);
             char *bytes = NULL;
             res_len += get_IO_bytes_info(bytes, prcs.inp_fd, prcs.out_fd);
             strcat(response, bytes);
-            send_response(prcs.pipe_fd, response, res_len);
+            send_response(prcs.pipe_fd, response, res_len, false);
             free(response);
             break;
     }
@@ -232,6 +234,7 @@ Process prcs_new(Request *rq){
 void prcs_add_transf(Process *prcs){
     if(!prcs->is_valid)
         return;
+
     for(int i=pp_get_len(prcs->pp);prcs->is_valid && i<prcs->req->data->transf_num;++i){
         Transformations tr;
         if(!string_to_transformation(prcs->req->data->transf_names[i], &tr))
@@ -244,8 +247,9 @@ void prcs_add_transf(Process *prcs){
         else if(!pp_add(transf_paths[tr], (char*[]){transf_paths[tr], NULL}, prcs->pp))
             prcs->is_valid=false;
         
-        else
+        else{
             ++transfs[tr].running_inst;
+        }
     }
 }
 
@@ -260,7 +264,7 @@ void prcs_free(Process prcs){
 void check_executing_prcs(){
     if(!pq_is_empty(executing_prcs_queue)){
         usleep(10*1000); // 10ms
-        printf("handling execution queue\n");
+        //printf("handling execution queue\n");
         Process prcs;
 
         while(pq_dequeue(&prcs, executing_prcs_queue)){
@@ -273,6 +277,8 @@ void check_executing_prcs(){
             prcs.completed_num = end_num;
             if(end_num==prcs.req->data->transf_num){
                 printf("prcs done\n");
+                prcs.status = CONCLUDED;
+                send_proc_status(prcs);
                 prcs_free(prcs);
             }
             else{
@@ -335,7 +341,7 @@ bool request_loop(int fifo_fd){
             char *response = "yo\n";
             int pipe_fd = open_server_to_client_fifo(hdr.client_pid);
             if(pipe_fd!=-1){
-                send_response(pipe_fd, response, 4);
+                send_response(pipe_fd, response, 4, false);
             }
             read_buf = (char*)&hdr;
             read_buf_size = sizeof(Request);
@@ -349,11 +355,14 @@ bool request_loop(int fifo_fd){
             }
             else{
                 Process prcs = prcs_new(p_req);
+                prcs.status = PENDING;
+                send_proc_status(prcs); //pending, foi para a queue
                 prcs_add_transf(&prcs);
                 if(prcs.is_valid){
+                    prcs.status = PROCESSING;
+                    send_proc_status(prcs);
                     pq_enqueue(&prcs, executing_prcs_queue);
                     fprintf(stderr, "[DEBUG] executing new process\n");
-                    prcs.status = PENDING;
                 }
                 else{
                     fprintf(stderr, "[DEBUG] rejected new process\n");
@@ -364,7 +373,6 @@ bool request_loop(int fifo_fd){
                 read_buf = (char*)&hdr;
                 read_buf_size = sizeof(Request);
                 p_req = NULL;
-                send_proc_status(prcs); //pending, foi para a queue
                 
             }
         }
@@ -382,10 +390,10 @@ int main(int argc, char* argv[]){
     }
 
     server_pid = getpid();
-    transf_folder = argv[1]; //guarda o path onde estão guardadas as transformações
+    transf_folder = argv[2]; //guarda o path onde estão guardadas as transformações
     printf("SETTING UP SERVER...\n");
     set_transf_paths();
-    if(set_config(argv[2])){ //se retornou um valor != 0 ocorreu algum erro
+    if(set_config(argv[1])){ //se retornou um valor != 0 ocorreu algum erro
         printf("Erro na leitura do ficheiro %s\n", argv[2]);
         return 1;
     }
@@ -407,7 +415,7 @@ int main(int argc, char* argv[]){
     printf("\nSETUP COMPLETE...\n");
 
     while(!server_exit){
-        printf("Searching for requests...\n");
+        //printf("Searching for requests...\n");
         request_loop(fifo_fd);
 
         check_executing_prcs();

@@ -139,17 +139,17 @@ int get_response(){
 
     int n;
     Message message;
-
-    if((n=read(fd[1], &message, sizeof(Message)))==-1){
-        perror("[CLIENT->SERVER FIFO]");
-        return 1;
-    }
-    else{
+    while((n=read(fd[1], &message, sizeof(Message)))>0){
         //fprintf(stderr, "[DEBUG] Status response received!");
         int len = message.len;
         char data[len];
         read(fd[1], &data, sizeof(char)*len);
         write(STDOUT_FILENO,data,sizeof(char)*len);
+        if(!message.wait) break;
+    }
+    if(n==-1){
+        perror("[CLIENT->SERVER FIFO]");
+        return 1;
     }
 
     return 0;
