@@ -61,6 +61,7 @@ typedef struct process {
     int prcs_num;
     int pipe_fd;
     int completed_num;
+    bool updateClientStatus;
     bool is_valid;
 }Process;
 

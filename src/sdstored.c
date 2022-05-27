@@ -221,6 +221,8 @@ Process prcs_new(Request *rq){
         .pipe_fd = open_server_to_client_fifo(rq->client_pid),
         .completed_num = 0,
         .is_valid = false,
+        .updateClientStatus = true,
+        .status = PENDING
     };
 
     if(prcs.inp_fd!=-1 && prcs.out_fd!=-1 && prcs.pipe_fd!=-1){
@@ -249,6 +251,10 @@ void prcs_add_transf(Process *prcs){
             prcs->is_valid=false;
         
         else{
+            if(prcs->status==PENDING){
+                prcs->status = PROCESSING;
+                prcs->updateClientStatus = true;
+            }
             ++transfs[tr].running_inst;
         }
     }
@@ -283,13 +289,26 @@ void check_executing_prcs(){
                 prcs_free(prcs);
             }
             else{
-                if(pp_get_len(prcs.pp)<prcs.req->data->transf_num)
-                    prcs_add_transf(&prcs);
+                prcs_add_transf(&prcs);
                 
-                if(!prcs.is_valid)
+                if(!prcs.is_valid){
+                    prcs.status = FAILURE;
+                    send_proc_status(prcs);
                     prcs_free(prcs);
-                else
+                }
+                else{
+                    if(pp_check_end_num(prcs.pp)==pp_get_len(prcs.pp)){
+                        prcs.status = PENDING;
+                        prcs.updateClientStatus = true;
+                    }
+                    if(prcs.updateClientStatus){
+                        send_proc_status(prcs);
+                        prcs.updateClientStatus = false;
+                    }
+                    
+                    
                     pq_enqueue(&prcs, executing_prcs_queue_swap);
+                }
             }
         }
         PriorityQueue *pq = executing_prcs_queue;
@@ -356,12 +375,10 @@ bool request_loop(int fifo_fd){
             }
             else{
                 Process prcs = prcs_new(p_req);
-                prcs.status = PENDING;
-                send_proc_status(prcs); //pending, foi para a queue
                 prcs_add_transf(&prcs);
                 if(prcs.is_valid){
-                    prcs.status = PROCESSING;
                     send_proc_status(prcs);
+                    prcs.updateClientStatus = false;
                     pq_enqueue(&prcs, executing_prcs_queue);
                     fprintf(stderr, "[DEBUG] executing new process\n");
                 }
