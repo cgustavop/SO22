@@ -29,7 +29,7 @@ char server_to_client_fifo[84];
     Retorna 1 em caso de insucesso ao abrir o FIFO e 0 em caso de sucesso. */
 int open_client_to_server_fifo(){
 
-    printf("[DEBUG] Opening client to server fifo...\n");
+    //printf("[DEBUG] Opening client to server fifo...\n");
     fd[0] = open(CLIENT_TO_SERVER_FIFO, O_WRONLY);
     if(fd[0] == -1) return 1; //falhou ligação
     //printf("[DEBUG] Connection established\n");
@@ -68,9 +68,9 @@ int open_server_to_client_fifo(){
  /* Envia uma request de processamento de um ficheiro ao servidor através do respetivo FIFO. */
 int send_process_request(Request *request){
     
-    printf("[DEBUG] Sending request\n");
+    //printf("[DEBUG] Sending request\n");
     if(write(fd[0], request, sizeof(Request)+sizeof(ProcessRequestData)) <= 0) return 1;
-    printf("[DEBUG] Request sent.\n");
+    //printf("[DEBUG] Request sent.\n");
 
     close(fd[0]);
     return 0; 
@@ -111,7 +111,7 @@ int send_status_request(Request *req){
 
     //printf("[DEBUG] Sending status request\n");
     write(fd[0], req, sizeof(Request));
-    printf("[DEBUG] Status request sent.\n");
+    //printf("[DEBUG] Status request sent.\n");
     
     return 0;
 }

@@ -132,7 +132,7 @@ int open_server_to_client_fifo(int client_pid){
     int n = snprintf(server_to_client_fifo, str_len, SERVER_TO_CLIENT_FIFO_TEMPL"%d", client_pid);
 
     if(n<=64 && n>0){
-        fprintf(stderr,"[DEBUG] FIFO path: %s\n", server_to_client_fifo);
+        //fprintf(stderr,"[DEBUG] FIFO path: %s\n", server_to_client_fifo);
         fd = open(server_to_client_fifo, O_WRONLY, 0666);
     }
     
@@ -357,7 +357,7 @@ bool request_loop(int fifo_fd){
             read_buf += n;
         }
         else if(hdr.type==STATUS_REQUEST){
-            fprintf(stderr,"[DEBUG] Recebi uma status request");
+            //fprintf(stderr,"[DEBUG] Recebi uma status request");
             char *response = "yo\n";
             int pipe_fd = open_server_to_client_fifo(hdr.client_pid);
             if(pipe_fd!=-1){
@@ -380,10 +380,10 @@ bool request_loop(int fifo_fd){
                     send_proc_status(prcs);
                     prcs.updateClientStatus = false;
                     pq_enqueue(&prcs, executing_prcs_queue);
-                    fprintf(stderr, "[DEBUG] executing new process\n");
+                    //fprintf(stderr, "[DEBUG] executing new process\n");
                 }
                 else{
-                    fprintf(stderr, "[DEBUG] rejected new process\n");
+                    //fprintf(stderr, "[DEBUG] rejected new process\n");
                     prcs.status = FAILURE;
                     send_proc_status(prcs); //failed, request rejeitada
                     prcs_free(prcs);

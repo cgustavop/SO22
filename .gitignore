@@ -3,3 +3,4 @@ bin/*
 sdstore
 sdstored
 .vscode/
+exec/*
