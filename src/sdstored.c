@@ -140,7 +140,7 @@ int open_server_to_client_fifo(int client_pid){
 }
 
 //int fstat(int fd, struct stat *buf);
-int get_IO_bytes_info(char *response, int input_fd, int output_fd){
+int get_IO_bytes_info(char **response, int input_fd, int output_fd){
     struct stat *input_stat = malloc(sizeof(struct stat));
     struct stat *output_stat = malloc(sizeof(struct stat));
 
@@ -151,9 +151,9 @@ int get_IO_bytes_info(char *response, int input_fd, int output_fd){
     int output_size = output_stat->st_size;
 
     int res_len = 33 + (NO_DIGITS(input_size)) + (NO_DIGITS(output_size));
-    response = malloc(sizeof(char)*res_len);
+    *response = malloc(sizeof(char)*res_len);
 
-    snprintf(response, res_len, " (bytes-input: %d, bytes-output: %d)", input_size, output_size);
+    snprintf(*response, res_len, "(bytes-input: %d, bytes-output: %d)\n", input_size, output_size);
 
     return res_len;
 }
@@ -189,14 +189,15 @@ void send_proc_status(Process prcs){
             send_response(prcs.pipe_fd, "processing\n", res_len, true);
             break;
         case CONCLUDED:
-            //TODO arranjar o número de bytes lidos e escritos
             res_len = 11;
-            char *response = strndup("concluded\n", res_len);
             char *bytes = NULL;
-            res_len += get_IO_bytes_info(bytes, prcs.inp_fd, prcs.out_fd);
-            strcat(response, bytes);
+            res_len += get_IO_bytes_info(&bytes, prcs.inp_fd, prcs.out_fd);
+            char *response = malloc(res_len*sizeof(char));
+            memcpy(response, "concluded\n", 11);
+            memcpy(response+11, bytes, res_len-11);
             send_response(prcs.pipe_fd, response, res_len, false);
             free(response);
+            free(bytes);
             break;
     }
 }
