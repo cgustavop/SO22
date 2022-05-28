@@ -3,6 +3,7 @@
 
 #include "process_pipeline.h"
 #include <math.h>
+#include <stddef.h>
 #include <string.h>
 
 #define NO_DIGITS(x) (x==0?1:log10(x)+1)
@@ -71,9 +72,9 @@ typedef struct request {
 typedef struct process {
     Request *req;
     ProcessPipeline *pp;
+    size_t prcs_num;
     int inp_fd;
     int out_fd;
-    int prcs_num;
     int pipe_fd;
     int completed_num;
     bool is_valid;

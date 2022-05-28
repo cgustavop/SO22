@@ -3,6 +3,10 @@ CCFLAGS = -g -Wall -Werror -Wextra -pedantic -fsanitize=undefined -fsanitize=add
 
 all: bin/sdstore bin/sdstored
 
+client: bin/sdstore
+
+server: bin/sdstored
+
 bin/sdstore :  obj/sdstore.o 
 	${CC} $^ -o $@ ${CCFLAGS}
 
