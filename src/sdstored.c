@@ -140,6 +140,51 @@ int open_server_to_client_fifo(int client_pid){
     return fd;
 }
 
+int get_status(char **response){
+    char *result = NULL;
+    char aux[1024];
+    int i = 0;
+    size_t cat_len = 0, res_len = 0;
+
+    if(pq_is_empty(executing_prcs_queue) == true){
+        PQ_FOREACH(process, Process, executing_prcs_queue){
+
+            cat_len = snprintf(aux, 1024, "task #%d: proc-file %d %s %s ", process->prcs_num, process->req->priority, process->req->data->input, process->req->data->output);
+            res_len += cat_len;
+            if(result == NULL) result = malloc(sizeof(char)*(res_len+1)); 
+            else result = realloc(result, sizeof(char)*(res_len+1));
+            strncat(result,aux,cat_len);
+
+            for(int j=0; j < process->req->data->transf_num; j++){
+                cat_len = snprintf(aux, 1024, "%s ", process->req->data->transf_names[j]);
+                res_len += cat_len;
+                result = realloc(result, sizeof(char)*res_len);
+                strncat(result,aux,cat_len);
+                j++;
+            }
+
+            res_len += 1;
+            result = realloc(result, sizeof(char)*(res_len+1));
+            strncat(result,"\n",2);
+            i++;
+
+        }
+    }
+
+    for(i = 0; i < TOTAL_TRANSFORMATIONS; i++){
+
+        cat_len = snprintf(aux, 1024, "transf %s: %d/%d (running/max)\n", transfs[i].name, transfs[i].running_inst, transfs[i].max_inst);
+        res_len += cat_len;
+        if(result == NULL) result = malloc(sizeof(char)*(res_len+1)); 
+        else result = realloc(result, sizeof(char)*(res_len+1));
+        strncat(result,aux,cat_len);
+
+    }
+
+    *response = result;
+    return res_len;
+}
+
 //int fstat(int fd, struct stat *buf);
 int get_IO_bytes_info(char **response, int input_fd, int output_fd){
     struct stat *input_stat = malloc(sizeof(struct stat));
@@ -358,11 +403,12 @@ bool request_loop(int fifo_fd){
             read_buf += n;
         }
         else if(hdr.type==STATUS_REQUEST){
-            //fprintf(stderr,"[DEBUG] Recebi uma status request");
-            char *response = "yo\n";
+            fprintf(stderr,"[DEBUG] Recebi uma status request\n");
+            char *response = "";
+            int res_len = get_status(&response);
             int pipe_fd = open_server_to_client_fifo(hdr.client_pid);
             if(pipe_fd!=-1){
-                send_response(pipe_fd, response, 4, false);
+                send_response(pipe_fd, response, res_len, false);
             }
             read_buf = (char*)&hdr;
             read_buf_size = sizeof(Request);
