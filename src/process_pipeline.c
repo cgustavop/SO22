@@ -35,6 +35,11 @@ void pp_free(ProcessPipeline *pp){
     free(pp);
 }
 
+void pp_term_processes(ProcessPipeline *pp){
+    for(int i=0;i<pp->pid_arr_len;++i)
+        kill(pp->pid_arr[i], SIGTERM);
+}
+
 bool pp_add(const char *exec_path, char *const exec_args[], ProcessPipeline *pp){
     
     if(pp->pid_arr_len==pp->pid_arr_size)

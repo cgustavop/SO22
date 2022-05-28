@@ -25,5 +25,7 @@ int pp_check_end_num(ProcessPipeline *pp);
 
 int pp_get_len(ProcessPipeline *pp);
 
+void pp_term_processes(ProcessPipeline *pp);
+
 
 #endif

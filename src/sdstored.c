@@ -1,4 +1,5 @@
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -28,7 +29,10 @@ int server_pid; //para guardar o pid do servidor
 char *transf_folder; //onde será guardado o path da pasta onde se encontram os executáveis das transformações
 TransformationData transfs[TOTAL_TRANSFORMATIONS]; //lista das várias transformações
 bool server_exit=false;
-int request_counter=0;
+size_t request_counter=0;
+
+PriorityQueue *pending_prcs_queue;
+PriorityQueue *pending_prcs_queue_swap;
 
 PriorityQueue *executing_prcs_queue;
 PriorityQueue *executing_prcs_queue_swap;
@@ -217,22 +221,44 @@ Process prcs_new(Request *rq){
     return prcs;
 }
 
-void prcs_add_transf(Process *prcs){
-    if(!prcs->is_valid)
-        return;
-    for(int i=pp_get_len(prcs->pp);prcs->is_valid && i<prcs->req->data->transf_num;++i){
-        Transformations tr = prcs->req->data->transfs[i];
+// void prcs_add_transf(Process *prcs){
+//     if(!prcs->is_valid)
+//         return;
+//     for(int i=pp_get_len(prcs->pp);prcs->is_valid && i<prcs->req->data->transf_num;++i){
+//         Transformations tr = prcs->req->data->transfs[i];
         
-        if(transfs[tr].running_inst==transfs[tr].max_inst){
-            break;
-        }
+//         if(transfs[tr].running_inst==transfs[tr].max_inst){
+//             break;
+//         }
         
-        else if(!pp_add(transf_paths[tr], (char*[]){transf_paths[tr], NULL}, prcs->pp))
-            prcs->is_valid=false;
+//         else if(!pp_add(transf_paths[tr], (char*[]){transf_paths[tr], NULL}, prcs->pp))
+//             prcs->is_valid=false;
         
-        else
-            ++transfs[tr].running_inst;
+//         else
+//             ++transfs[tr].running_inst;
+//     }
+// }
+
+bool prcs_try_start_execution(Process *prcs){
+    for(int i=0;i<prcs->req->data->transf_num;++i){
+        TransformationData *trd = &transfs[prcs->req->data->transfs[i]];
+        if(trd->running_inst == trd->max_inst)
+            return false;
     }
+
+    for(int i=0;i<prcs->req->data->transf_num;++i){
+        Transformations tr = prcs->req->data->transfs[i];
+        if(!pp_add(transf_paths[tr], (char*[]){transf_paths[tr], NULL}, prcs->pp)){
+            pp_term_processes(prcs->pp);
+            return false;
+        }
+    }
+
+    for(int i=0;i<prcs->req->data->transf_num;++i){
+        transfs[prcs->req->data->transfs[i]].running_inst++;
+    }
+
+    return true;
 }
 
 void prcs_free(Process prcs){
@@ -245,8 +271,8 @@ void prcs_free(Process prcs){
 
 void check_executing_prcs(){
     if(!pq_is_empty(executing_prcs_queue)){
-        usleep(10*1000); // 10ms
-        printf("handling execution queue\n");
+        // usleep(10*1000); // 10ms
+        // printf("handling execution queue\n");
         Process prcs;
 
         while(pq_dequeue(&prcs, executing_prcs_queue)){
@@ -260,19 +286,28 @@ void check_executing_prcs(){
                 printf("prcs done\n");
                 prcs_free(prcs);
             }
-            else{
-                if(pp_get_len(prcs.pp)<prcs.req->data->transf_num)
-                    prcs_add_transf(&prcs);
-                
-                if(!prcs.is_valid)
-                    prcs_free(prcs);
-                else
-                    pq_enqueue(&prcs, executing_prcs_queue_swap);
-            }
+            else
+                pq_enqueue(&prcs, executing_prcs_queue_swap);
+
         }
         PriorityQueue *pq = executing_prcs_queue;
         executing_prcs_queue = executing_prcs_queue_swap;
         executing_prcs_queue_swap = pq;
+        
+    }
+    if(!pq_is_empty(pending_prcs_queue)){
+        Process prcs;
+        while(pq_dequeue(&prcs, pending_prcs_queue)){
+            if(prcs_try_start_execution(&prcs)){
+                pq_enqueue(&prcs, executing_prcs_queue);
+            }
+            else
+                pq_enqueue(&prcs, pending_prcs_queue_swap);
+        }
+
+        PriorityQueue *pq = pending_prcs_queue;
+        pending_prcs_queue = pending_prcs_queue_swap;
+        pending_prcs_queue_swap = pq;
     }
 }
 
@@ -333,20 +368,21 @@ bool request_loop(int fifo_fd){
             }
             else{
                 Process prcs = prcs_new(p_req);
-                prcs_add_transf(&prcs);
                 if(prcs.is_valid){
-                    pq_enqueue(&prcs, executing_prcs_queue);
+                    if(prcs_try_start_execution(&prcs))
+                        pq_enqueue(&prcs, executing_prcs_queue);
+                    else
+                        pq_enqueue(&prcs, pending_prcs_queue);
+
                     fprintf(stderr, "[DEBUG] executing new process\n");
                 }
                 else{
                     fprintf(stderr, "[DEBUG] rejected new process\n");
-                    // send failure
                     prcs_free(prcs);
                 }
                 read_buf = (char*)&hdr;
                 read_buf_size = sizeof(Request);
                 p_req = NULL;
-                // mandar pending
                 
             }
         }
@@ -385,11 +421,13 @@ int main(int argc, char* argv[]){
 
     executing_prcs_queue = pq_new(sizeof(Process), process_prio_comp);
     executing_prcs_queue_swap = pq_new(sizeof(Process), process_prio_comp);
+    pending_prcs_queue = pq_new(sizeof(Process), process_prio_comp);
+    pending_prcs_queue_swap = pq_new(sizeof(Process), process_prio_comp);
 
     printf("\nSETUP COMPLETE...\n");
 
     while(!server_exit){
-        printf("Searching for requests...\n");
+        // printf("Searching for requests...\n");
         request_loop(fifo_fd);
 
         check_executing_prcs();
