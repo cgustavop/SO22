@@ -73,7 +73,6 @@ typedef struct process {
     int out_fd;
     int pipe_fd;
     int completed_num;
-    bool updateClientStatus;
     bool is_valid;
 }Process;
 

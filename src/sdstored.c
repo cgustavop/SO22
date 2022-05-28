@@ -133,30 +133,29 @@ int get_status(char **response){
     int i = 0;
     size_t cat_len = 0, res_len = 0;
 
-    if(pq_is_empty(executing_prcs_queue) == true){
-        PQ_FOREACH(process, Process, executing_prcs_queue){
+    PQ_FOREACH(process, Process, executing_prcs_queue){
 
-            cat_len = snprintf(aux, 1024, "task #%ld: proc-file %d %s %s ", process->prcs_num, process->req->priority, process->req->data->input, process->req->data->output);
+        cat_len = snprintf(aux, 1024, "task #%ld: proc-file %d %s %s ", process->prcs_num, process->req->priority, process->req->data->input, process->req->data->output);
+        res_len += cat_len;
+        if(result == NULL) result = malloc(sizeof(char)*(res_len+1)); 
+        else result = realloc(result, sizeof(char)*(res_len+1));
+        strncat(result,aux,cat_len);
+
+        for(int j=0; j < process->req->data->transf_num; j++){
+            cat_len = snprintf(aux, 1024, "%s ", transf_names[process->req->data->transfs[j]]);
             res_len += cat_len;
-            if(result == NULL) result = malloc(sizeof(char)*(res_len+1)); 
-            else result = realloc(result, sizeof(char)*(res_len+1));
+            result = realloc(result, sizeof(char)*res_len);
             strncat(result,aux,cat_len);
-
-            for(int j=0; j < process->req->data->transf_num; j++){
-                cat_len = snprintf(aux, 1024, "%s ", transf_names[process->req->data->transfs[j]]);
-                res_len += cat_len;
-                result = realloc(result, sizeof(char)*res_len);
-                strncat(result,aux,cat_len);
-                j++;
-            }
-
-            res_len += 1;
-            result = realloc(result, sizeof(char)*(res_len+1));
-            strncat(result,"\n",2);
-            i++;
-
+            j++;
         }
+
+        res_len += 1;
+        result = realloc(result, sizeof(char)*(res_len+1));
+        strncat(result,"\n",2);
+        i++;
+
     }
+    
 
     for(i = 0; i < TOTAL_TRANSFORMATIONS; i++){
 
@@ -187,6 +186,9 @@ int get_IO_bytes_info(char **response, int input_fd, int output_fd){
     *response = malloc(sizeof(char)*res_len);
 
     snprintf(*response, res_len, "(bytes-input: %d, bytes-output: %d)\n", input_size, output_size);
+
+    free(input_stat);
+    free(output_stat);
 
     return res_len;
 }
@@ -246,6 +248,25 @@ void set_transf_paths(){
     }
 }
 
+bool check_transf_number(Process *prcs){
+    if(prcs->is_valid==false)
+        return false;
+    
+    int tr_cnt[TOTAL_TRANSFORMATIONS]={0};
+    for(int i=0;i<prcs->req->data->transf_num;++i){
+        tr_cnt[prcs->req->data->transfs[i]]++;
+    }
+
+    for(int i=0;i<TOTAL_TRANSFORMATIONS;++i){
+        if(tr_cnt[i]>transfs[i].max_inst){
+            prcs->is_valid = false;
+            return false;
+        }
+    }
+
+    return true;
+}
+
 Process prcs_new(Request *rq){
     Process prcs = {
         .req = rq,
@@ -254,8 +275,8 @@ Process prcs_new(Request *rq){
         .pipe_fd = open_server_to_client_fifo(rq->client_pid),
         .completed_num = 0,
         .is_valid = false,
-        .updateClientStatus = true,
-        .status = PENDING
+        .status = PENDING,
+        .pp = NULL,
     };
 
     if(prcs.inp_fd!=-1 && prcs.out_fd!=-1 && prcs.pipe_fd!=-1){
@@ -268,6 +289,9 @@ Process prcs_new(Request *rq){
 }
 
 bool prcs_try_start_execution(Process *prcs){
+    if(prcs->is_valid==false)
+        return false;
+    
     for(int i=0;i<prcs->req->data->transf_num;++i){
         TransformationData *trd = &transfs[prcs->req->data->transfs[i]];
         if(trd->running_inst == trd->max_inst)
@@ -393,6 +417,7 @@ bool request_loop(int fifo_fd){
             if(pipe_fd!=-1){
                 send_response(pipe_fd, response, res_len, false);
             }
+            free(response);
             read_buf = (char*)&hdr;
             read_buf_size = sizeof(Request);
         }
@@ -405,6 +430,7 @@ bool request_loop(int fifo_fd){
             }
             else{
                 Process prcs = prcs_new(p_req);
+                check_transf_number(&prcs);
                 if(prcs.is_valid){
                     if(prcs_try_start_execution(&prcs)){
                         prcs.status = PROCESSING;
@@ -421,6 +447,8 @@ bool request_loop(int fifo_fd){
                 }
                 else{
                     fprintf(stderr, "[DEBUG] rejected new process\n");
+                    prcs.status = FAILURE;
+                    send_proc_status(&prcs);
                     prcs_free(prcs);
                 }
                 read_buf = (char*)&hdr;
@@ -474,13 +502,17 @@ int main(int argc, char* argv[]){
     while(!server_exit || (!pq_is_empty(executing_prcs_queue) || !pq_is_empty(pending_prcs_queue))){
         // printf("Searching for requests...\n");
         request_loop(fifo_fd);
-        //handle_prcs_queues();
+        handle_prcs_queues();
     }
 
     pq_free(executing_prcs_queue);
     pq_free(executing_prcs_queue_swap);
     pq_free(pending_prcs_queue);
     pq_free(pending_prcs_queue_swap);
+
+    for(int i=0;i<TOTAL_TRANSFORMATIONS;++i){
+        free(transf_paths[i]);
+    }
 
     close(fifo_fd);
     close(fifo_fd_wr);
