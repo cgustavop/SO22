@@ -1,0 +1,7 @@
+nop 50
+bcompress 50
+bdecompress 50
+gcompress 50
+gdecompress 50
+encrypt 50
+decrypt 50

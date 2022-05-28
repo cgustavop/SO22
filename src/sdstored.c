@@ -13,6 +13,7 @@
 #include <assert.h>
 #include <poll.h>
 #include <math.h>
+#include <signal.h>
 
 #include "request.h"
 #include "priority_queue.h"
@@ -73,7 +74,7 @@ int process_prio_comp(void *va, void *vb){
 }
 
 
-void sigterm_handler(int signum){
+void sigint_handler(int signum){
     (void)signum;
     server_exit = true;
 }
@@ -119,23 +120,60 @@ int open_server_to_client_fifo(int client_pid){
     int n = snprintf(server_to_client_fifo, str_len, SERVER_TO_CLIENT_FIFO_TEMPL"%d", client_pid);
 
     if(n<=64 && n>0){
-        fprintf(stderr,"[DEBUG] FIFO path: %s\n", server_to_client_fifo);
+        //fprintf(stderr,"[DEBUG] FIFO path: %s\n", server_to_client_fifo);
         fd = open(server_to_client_fifo, O_WRONLY, 0666);
     }
     
     return fd;
 }
 
+int get_status(char **response){
+    char *result = NULL;
+    char aux[1024];
+    int i = 0;
+    size_t cat_len = 0, res_len = 0;
 
-int get_status(char *response){
-    int res_len = 6;
-    char teste[6] = "teste";
-    memcpy(response, teste, res_len);
+    if(pq_is_empty(executing_prcs_queue) == true){
+        PQ_FOREACH(process, Process, executing_prcs_queue){
+
+            cat_len = snprintf(aux, 1024, "task #%ld: proc-file %d %s %s ", process->prcs_num, process->req->priority, process->req->data->input, process->req->data->output);
+            res_len += cat_len;
+            if(result == NULL) result = malloc(sizeof(char)*(res_len+1)); 
+            else result = realloc(result, sizeof(char)*(res_len+1));
+            strncat(result,aux,cat_len);
+
+            for(int j=0; j < process->req->data->transf_num; j++){
+                cat_len = snprintf(aux, 1024, "%s ", transf_names[process->req->data->transfs[j]]);
+                res_len += cat_len;
+                result = realloc(result, sizeof(char)*res_len);
+                strncat(result,aux,cat_len);
+                j++;
+            }
+
+            res_len += 1;
+            result = realloc(result, sizeof(char)*(res_len+1));
+            strncat(result,"\n",2);
+            i++;
+
+        }
+    }
+
+    for(i = 0; i < TOTAL_TRANSFORMATIONS; i++){
+
+        cat_len = snprintf(aux, 1024, "transf %s: %d/%d (running/max)\n", transfs[i].name, transfs[i].running_inst, transfs[i].max_inst);
+        res_len += cat_len;
+        if(result == NULL) result = malloc(sizeof(char)*(res_len+1)); 
+        else result = realloc(result, sizeof(char)*(res_len+1));
+        strncat(result,aux,cat_len);
+
+    }
+
+    *response = result;
     return res_len;
 }
 
 //int fstat(int fd, struct stat *buf);
-void get_IO_bytes_info(char *response, int input_fd, int output_fd){
+int get_IO_bytes_info(char **response, int input_fd, int output_fd){
     struct stat *input_stat = malloc(sizeof(struct stat));
     struct stat *output_stat = malloc(sizeof(struct stat));
 
@@ -145,48 +183,54 @@ void get_IO_bytes_info(char *response, int input_fd, int output_fd){
     int input_size = input_stat->st_size;
     int output_size = output_stat->st_size;
 
-    int res_len = 32 + (NO_DIGITS(input_size)) + (NO_DIGITS(output_size));
-    response = malloc(sizeof(char)*res_len);
+    int res_len = 33 + (NO_DIGITS(input_size)) + (NO_DIGITS(output_size));
+    *response = malloc(sizeof(char)*res_len);
 
-    snprintf(response, res_len, "(bytes-input: %d, bytes-output: %d)", input_size, output_size);
+    snprintf(*response, res_len, "(bytes-input: %d, bytes-output: %d)\n", input_size, output_size);
+
+    return res_len;
 }
 
-void send_response(int client_pid, char response[], int response_len){
+void send_response(int pipe_fd, char response[], int response_len, bool wait){
     
     char res_buf[sizeof(Message)+(sizeof(char)*response_len)];
     Message *message = (Message*)res_buf;
 
+    message->wait = wait;
     message->len = response_len;
-    //message->data[25] = "status request recebido";
     memcpy(message->data, response, (sizeof(char)*response_len));
-    int client_fifo_fd = open_server_to_client_fifo(client_pid); //TODO cliente cria o fifo e não o servidor
 
-    write(client_fifo_fd, message, sizeof(res_buf));
+    write(pipe_fd, message, sizeof(res_buf));
 }
 
 //void send_proc_status(int input_fd,int output_fd,int client_pid, Status status){
-void send_proc_status(Process prcs){
+void send_proc_status(const Process *prcs){
     int res_len = 0;
-    Request *req = prcs.req;
-    ProcessRequestData *data = req->data;
-    switch(data->status){
+
+    switch(prcs->status){
+        case FAILURE:
+            res_len = 32;
+            send_response(prcs->pipe_fd, "failed to process your request\n", res_len, false);
+            break;
         case PENDING:
-            res_len = 8;
-            send_response(req->client_pid, "pending", res_len);
+            res_len = 9;
+            send_response(prcs->pipe_fd, "pending\n", res_len, true);
             break;
         
         case PROCESSING:
             res_len = 11;
-            send_response(req->client_pid, "processing", res_len);
+            send_response(prcs->pipe_fd, "processing\n", res_len, true);
             break;
         case CONCLUDED:
             res_len = 11;
-            char *response = strndup("concluded ", res_len);
             char *bytes = NULL;
-            get_IO_bytes_info(bytes, prcs.inp_fd, prcs.out_fd);
-            send_response(req->client_pid, response, res_len);
+            res_len += get_IO_bytes_info(&bytes, prcs->inp_fd, prcs->out_fd);
+            char *response = malloc(res_len*sizeof(char));
+            memcpy(response, "concluded\n", 11);
+            memcpy(response+11, bytes, res_len-11);
+            send_response(prcs->pipe_fd, response, res_len, false);
             free(response);
-
+            free(bytes);
             break;
     }
 }
@@ -210,6 +254,8 @@ Process prcs_new(Request *rq){
         .pipe_fd = open_server_to_client_fifo(rq->client_pid),
         .completed_num = 0,
         .is_valid = false,
+        .updateClientStatus = true,
+        .status = PENDING
     };
 
     if(prcs.inp_fd!=-1 && prcs.out_fd!=-1 && prcs.pipe_fd!=-1){
@@ -251,7 +297,7 @@ void prcs_free(Process prcs){
     free(prcs.req);
 }
 
-void check_executing_prcs(){
+void handle_prcs_queues(){
     if(!pq_is_empty(executing_prcs_queue)){
         // usleep(10*1000); // 10ms
         // printf("handling execution queue\n");
@@ -266,6 +312,8 @@ void check_executing_prcs(){
             prcs.completed_num = end_num;
             if(end_num==prcs.req->data->transf_num){
                 printf("prcs done\n");
+                prcs.status = CONCLUDED;
+                send_proc_status(&prcs);
                 prcs_free(prcs);
             }
             else
@@ -281,10 +329,15 @@ void check_executing_prcs(){
         Process prcs;
         while(pq_dequeue(&prcs, pending_prcs_queue)){
             if(prcs_try_start_execution(&prcs)){
+                prcs.status = PROCESSING;
+                send_proc_status(&prcs);
                 pq_enqueue(&prcs, executing_prcs_queue);
             }
-            else
-                pq_enqueue(&prcs, pending_prcs_queue_swap);
+            else{
+                prcs.status = PENDING;
+                send_proc_status(&prcs);
+                pq_enqueue(&prcs, pending_prcs_queue);
+            }
         }
 
         PriorityQueue *pq = pending_prcs_queue;
@@ -333,11 +386,13 @@ bool request_loop(int fifo_fd){
             read_buf += n;
         }
         else if(hdr.type==STATUS_REQUEST){
-            fprintf(stderr,"[DEBUG] Recebi uma status request");
-            char *response = NULL;
-            int res_len = get_status(response);
-            send_response(hdr.client_pid, response, res_len);
-            free(response);
+            fprintf(stderr,"[DEBUG] Recebi uma status request\n");
+            char *response = "";
+            int res_len = get_status(&response);
+            int pipe_fd = open_server_to_client_fifo(hdr.client_pid);
+            if(pipe_fd!=-1){
+                send_response(pipe_fd, response, res_len, false);
+            }
             read_buf = (char*)&hdr;
             read_buf_size = sizeof(Request);
         }
@@ -351,10 +406,16 @@ bool request_loop(int fifo_fd){
             else{
                 Process prcs = prcs_new(p_req);
                 if(prcs.is_valid){
-                    if(prcs_try_start_execution(&prcs))
+                    if(prcs_try_start_execution(&prcs)){
+                        prcs.status = PROCESSING;
+                        send_proc_status(&prcs);
                         pq_enqueue(&prcs, executing_prcs_queue);
-                    else
+                    }
+                    else{
+                        prcs.status = PENDING;
+                        send_proc_status(&prcs);
                         pq_enqueue(&prcs, pending_prcs_queue);
+                    }
 
                     fprintf(stderr, "[DEBUG] executing new process\n");
                 }
@@ -406,16 +467,25 @@ int main(int argc, char* argv[]){
     pending_prcs_queue = pq_new(sizeof(Process), process_prio_comp);
     pending_prcs_queue_swap = pq_new(sizeof(Process), process_prio_comp);
 
+    signal(SIGINT, sigint_handler);
+
     printf("\nSETUP COMPLETE...\n");
 
-    while(!server_exit){
+    while(!server_exit || (!pq_is_empty(executing_prcs_queue) || !pq_is_empty(pending_prcs_queue))){
         // printf("Searching for requests...\n");
         request_loop(fifo_fd);
-
-        check_executing_prcs();
+        //handle_prcs_queues();
     }
+
+    pq_free(executing_prcs_queue);
+    pq_free(executing_prcs_queue_swap);
+    pq_free(pending_prcs_queue);
+    pq_free(pending_prcs_queue_swap);
 
     close(fifo_fd);
     close(fifo_fd_wr);
+
+    fprintf(stderr, "[DEBUG] closing...\n");
+
     return 0;
 }

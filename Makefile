@@ -1,7 +1,10 @@
 CC = gcc
-CCFLAGS = -g -Wall -Werror -Wextra -pedantic -fsanitize=undefined -fsanitize=address -lm
+CCFLAGS = -g -Wall -Werror -Wextra -pedantic -lm
 
-all: bin/sdstore bin/sdstored
+all: bin/sdstore bin/sdstored execs
+
+execs:
+	$(MAKE) -C ./exec/
 
 client: bin/sdstore
 
@@ -29,6 +32,3 @@ clean :
 	@echo "Cleaning..."
 	rm -rf bin/*
 	rm -rf obj/*.o
-	
-
-	

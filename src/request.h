@@ -1,12 +1,13 @@
 #ifndef __PROCESS_H__
 #define __PROCESS_H__
 
+#include <stdbool.h>
 #include "process_pipeline.h"
 #include <math.h>
 #include <stddef.h>
 #include <string.h>
 
-#define NO_DIGITS(x) (x==0?1:log10(x)+1)
+#define NO_DIGITS(x) (x==0?1:(int)(log10(x)+1))
 #define TOTAL_TRANSFORMATIONS 7
 
 #define PATH_SIZE 1024
@@ -20,22 +21,17 @@ typedef enum MessageType{
 }MessageType;
 
 typedef enum Status{
+    FAILURE,
     PENDING,
     PROCESSING,
     CONCLUDED
 }Status;
 
 typedef struct Message{
-    //MessageType type;
+    bool wait; // wait true, o cliente espera por mais mensagens (vice-versa)
     int len;
     char data[];
 }Message;
-
-// typedef struct transformation {
-//     char name[16];
-//     int max_inst;
-//     int running_inst;
-// } Transformation;
 
 typedef enum transformations {
     nop=0,
@@ -53,13 +49,12 @@ typedef enum RequestType{
 }RequestType;
 
 typedef struct processRequestData {
+    char input[PATH_SIZE];
+    char output[PATH_SIZE];
+    Transformations transfs[32];
     int transf_num;
     int input_len;
     int output_len;
-    Status status;
-    Transformations transfs[32];
-    char input[PATH_SIZE];
-    char output[PATH_SIZE];
 } ProcessRequestData;
 
 typedef struct request {
@@ -73,10 +68,12 @@ typedef struct process {
     Request *req;
     ProcessPipeline *pp;
     size_t prcs_num;
+    Status status;
     int inp_fd;
     int out_fd;
     int pipe_fd;
     int completed_num;
+    bool updateClientStatus;
     bool is_valid;
 }Process;
 

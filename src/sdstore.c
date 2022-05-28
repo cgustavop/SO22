@@ -29,7 +29,7 @@ char server_to_client_fifo[84];
     Retorna 1 em caso de insucesso ao abrir o FIFO e 0 em caso de sucesso. */
 int open_client_to_server_fifo(){
 
-    printf("[DEBUG] Opening client to server fifo...\n");
+    //printf("[DEBUG] Opening client to server fifo...\n");
     fd[0] = open(CLIENT_TO_SERVER_FIFO, O_WRONLY);
     if(fd[0] == -1) return 1; //falhou ligação
     //printf("[DEBUG] Connection established\n");
@@ -68,9 +68,9 @@ int open_server_to_client_fifo(){
  /* Envia uma request de processamento de um ficheiro ao servidor através do respetivo FIFO. */
 int send_process_request(Request *request){
     
-    printf("[DEBUG] Sending request\n");
+    //printf("[DEBUG] Sending request\n");
     if(write(fd[0], request, sizeof(Request)+sizeof(ProcessRequestData)) <= 0) return 1;
-    printf("[DEBUG] Request sent.\n");
+    //printf("[DEBUG] Request sent.\n");
 
     close(fd[0]);
     return 0; 
@@ -116,7 +116,7 @@ int send_status_request(Request *req){
 
     //printf("[DEBUG] Sending status request\n");
     write(fd[0], req, sizeof(Request));
-    printf("[DEBUG] Status request sent.\n");
+    //printf("[DEBUG] Status request sent.\n");
     
     return 0;
 }
@@ -144,25 +144,17 @@ int get_response(){
 
     int n;
     Message message;
-
-    while((n=read(fd[1], &message, sizeof(Message)))!=0){
-        if(n==-1){
-            if(errno==EAGAIN || errno==EWOULDBLOCK){
-                continue;
-            }
-            else{
-                perror("[CLIENT->SERVER FIFO]");
-                return 1;
-            }
-        }
-        else{
-            //fprintf(stderr, "[DEBUG] Status response received!");
-            int len = message.len;
-            char data[len];
-            read(fd[1], &data, sizeof(char)*len);
-            write(1,data,sizeof(char)*len);
-            break;
-        }
+    while((n=read(fd[1], &message, sizeof(Message)))>0){
+        //fprintf(stderr, "[DEBUG] Status response received!");
+        int len = message.len;
+        char data[len];
+        read(fd[1], &data, sizeof(char)*len);
+        write(STDOUT_FILENO,data,sizeof(char)*len);
+        if(!message.wait) break;
+    }
+    if(n==-1){
+        perror("[CLIENT->SERVER FIFO]");
+        return 1;
     }
 
     return 0;
@@ -244,8 +236,12 @@ int main(int argc, char* argv[]){ //./sdstore proc-file -p prioridade samples/fi
             }
 
         } else if(strcmp(argv[1], "status") == 0){
+            create_server_to_client_fifo();
+            create_status_request(req);
             open_client_to_server_fifo();
-            get_status(req);
+            send_status_request(req);
+            open_server_to_client_fifo();
+            get_response();
             terminate_prog();
         }
     }else{
