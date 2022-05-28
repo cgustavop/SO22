@@ -20,15 +20,7 @@
 static_assert(sizeof(Request)+sizeof(ProcessRequestData)<=PIPE_BUF, "requests too big, non atomic writes");
 
 
-static char *transf_names[] = {
-    "nop\0",
-    "bcompress\0",
-    "bdecompress\0", 
-    "gcompress\0", 
-    "gdecompress\0", 
-    "encrypt\0", 
-    "decrypt\0"
-};
+
 
 char *transf_paths[TOTAL_TRANSFORMATIONS];
 
@@ -82,15 +74,6 @@ void sigterm_handler(int signum){
     server_exit = true;
 }
 
-bool string_to_transformation(char *str, Transformations *out){
-    for(int i=0;i<TOTAL_TRANSFORMATIONS;++i){
-        if(strcmp(str, transf_names[i])==0){
-            *out = i;
-            return true;
-        }
-    }
-    return false;
-}
 
 // <exec file name> <max. paralel instances>
 int set_config(char* config_file_path){ //lê o config file linha a linha e define parâmetros para as várias transformações
@@ -238,11 +221,9 @@ void prcs_add_transf(Process *prcs){
     if(!prcs->is_valid)
         return;
     for(int i=pp_get_len(prcs->pp);prcs->is_valid && i<prcs->req->data->transf_num;++i){
-        Transformations tr;
-        if(!string_to_transformation(prcs->req->data->transf_names[i], &tr))
-            prcs->is_valid=false;
+        Transformations tr = prcs->req->data->transfs[i];
         
-        else if(transfs[tr].running_inst==transfs[tr].max_inst){
+        if(transfs[tr].running_inst==transfs[tr].max_inst){
             break;
         }
         
@@ -271,8 +252,7 @@ void check_executing_prcs(){
         while(pq_dequeue(&prcs, executing_prcs_queue)){
             int end_num = pp_check_end_num(prcs.pp);
             for(int i=prcs.completed_num;i<end_num;++i){
-                Transformations tr;
-                string_to_transformation(prcs.req->data->transf_names[i], &tr);
+                Transformations tr = prcs.req->data->transfs[i];
                 transfs[tr].running_inst--;
             }
             prcs.completed_num = end_num;
@@ -384,10 +364,10 @@ int main(int argc, char* argv[]){
     }
 
     server_pid = getpid();
-    transf_folder = argv[1]; //guarda o path onde estão guardadas as transformações
+    transf_folder = argv[2]; //guarda o path onde estão guardadas as transformações
     printf("SETTING UP SERVER...\n");
     set_transf_paths();
-    if(set_config(argv[2])){ //se retornou um valor != 0 ocorreu algum erro
+    if(set_config(argv[1])){ //se retornou um valor != 0 ocorreu algum erro
         printf("Erro na leitura do ficheiro %s\n", argv[2]);
         return 1;
     }

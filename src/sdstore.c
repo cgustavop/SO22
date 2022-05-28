@@ -77,7 +77,7 @@ int send_process_request(Request *request){
 }
  /* Preenche os dados relativos a uma request de processamento de um ficheiro.
     Coloca a informação na struct endereçada nos argumentos. */
-void create_process_request(int priority, char** execs, int total_num_transfs, char* input_path, char* output_path, Request *req){
+bool create_process_request(int priority, char** execs, int total_num_transfs, char* input_path, char* output_path, Request *req){
     ProcessRequestData *req_data = (ProcessRequestData*)req->data;
 
     req->client_pid = getpid();
@@ -85,7 +85,11 @@ void create_process_request(int priority, char** execs, int total_num_transfs, c
     req->type = PROCESS_REQUEST;
 
     for(int i = 0; i < total_num_transfs; i++){
-        strncpy(req_data->transf_names[i], execs[i], 16);
+        Transformations tr;
+        if(string_to_transformation(execs[i], &tr))
+            req_data->transfs[i] = tr;
+        else
+            return false;
     }
     char *inp = realpath(input_path, NULL);
     char *outp = realpath(output_path, NULL);
@@ -95,7 +99,8 @@ void create_process_request(int priority, char** execs, int total_num_transfs, c
     free(outp);
 
     req_data->transf_num = total_num_transfs;
-
+    
+    return true;
 }
  /* Preenche os dados relativos a uma request de status.
     Coloca a informação na struct endereçada nos argumentos. */

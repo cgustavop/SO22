@@ -42,7 +42,8 @@ bool pp_add(const char *exec_path, char *const exec_args[], ProcessPipeline *pp)
 
     int pipefd[2], pid;
 
-    pipe(pipefd); // [todo] error handling
+    if(pipe(pipefd)==-1)
+        return false;
 
     if((pid=fork())==0){
         close(pipefd[0]);
