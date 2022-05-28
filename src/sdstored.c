@@ -12,6 +12,7 @@
 #include <assert.h>
 #include <poll.h>
 #include <math.h>
+#include <signal.h>
 
 #include "request.h"
 #include "priority_queue.h"
@@ -77,7 +78,7 @@ int process_prio_comp(void *va, void *vb){
 }
 
 
-void sigterm_handler(int signum){
+void sigint_handler(int signum){
     (void)signum;
     server_exit = true;
 }
@@ -430,16 +431,20 @@ int main(int argc, char* argv[]){
     executing_prcs_queue = pq_new(sizeof(Process), process_prio_comp);
     executing_prcs_queue_swap = pq_new(sizeof(Process), process_prio_comp);
 
+    signal(SIGINT, sigint_handler);
+
     printf("\nSETUP COMPLETE...\n");
 
     while(!server_exit){
         //printf("Searching for requests...\n");
         request_loop(fifo_fd);
-
         check_executing_prcs();
     }
 
     close(fifo_fd);
     close(fifo_fd_wr);
+
+    fprintf(stderr, "[DEBUG] closing...\n");
+
     return 0;
 }
