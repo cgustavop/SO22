@@ -385,7 +385,7 @@ bool request_loop(int fifo_fd){
                     poll(&pfd, 1, 20);
                 }
                 else{
-                    if(!server_exit && pq_is_empty(executing_prcs_queue)){
+                    if(!server_exit && pq_is_empty(executing_prcs_queue) && pq_is_empty(pending_prcs_queue)){
                         if(poll(&pfd, 1, -1)==-1){
                             perror("request loop poll error");
                         }
@@ -428,18 +428,9 @@ bool request_loop(int fifo_fd){
                 Process prcs = prcs_new(p_req);
                 check_transf_number(&prcs);
                 if(prcs.is_valid){
-                    if(prcs_try_start_execution(&prcs)){
-                        prcs.status = PROCESSING;
-                        send_proc_status(&prcs);
-                        pq_enqueue(&prcs, executing_prcs_queue);
-                    }
-                    else{
-                        prcs.status = PENDING;
-                        send_proc_status(&prcs);
-                        pq_enqueue(&prcs, pending_prcs_queue);
-                    }
-
-                    
+                    prcs.status = PENDING;
+                    send_proc_status(&prcs);
+                    pq_enqueue(&prcs, pending_prcs_queue);
                 }
                 else{
                     fprintf(stderr, "[DEBUG] rejected new process\n");
