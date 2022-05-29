@@ -74,7 +74,7 @@ int process_prio_comp(void *va, void *vb){
 }
 
 
-void sigint_handler(int signum){
+void sigterm_handler(int signum){
     (void)signum;
     server_exit = true;
 }
@@ -84,7 +84,6 @@ void sigint_handler(int signum){
 int set_config(char* config_file_path){ //lê o config file linha a linha e define parâmetros para as várias transformações
     int fd = openat(AT_FDCWD, config_file_path, O_RDONLY);
 
-    //printf("%s\n", config_file_path);
     if(fd == -1) return 1;
     char buf[64];
 
@@ -137,14 +136,14 @@ int get_status(char **response){
 
         cat_len = snprintf(aux, 1024, "task #%ld: proc-file %d %s %s ", process->prcs_num, process->req->priority, process->req->data->input, process->req->data->output);
         res_len += cat_len;
-        if(result == NULL) result = malloc(sizeof(char)*(res_len+1)); 
+        if(result == NULL) result = calloc(res_len+1, sizeof(char)); 
         else result = realloc(result, sizeof(char)*(res_len+1));
         strncat(result,aux,cat_len);
 
         for(int j=0; j < process->req->data->transf_num; j++){
             cat_len = snprintf(aux, 1024, "%s ", transf_names[process->req->data->transfs[j]]);
             res_len += cat_len;
-            result = realloc(result, sizeof(char)*res_len);
+            result = realloc(result, sizeof(char)*(res_len+1));
             strncat(result,aux,cat_len);
             j++;
         }
@@ -161,8 +160,10 @@ int get_status(char **response){
 
         cat_len = snprintf(aux, 1024, "transf %s: %d/%d (running/max)\n", transfs[i].name, transfs[i].running_inst, transfs[i].max_inst);
         res_len += cat_len;
-        if(result == NULL) result = malloc(sizeof(char)*(res_len+1)); 
-        else result = realloc(result, sizeof(char)*(res_len+1));
+        if(result == NULL)
+            result = calloc(res_len+1, sizeof(char));
+        else 
+            result = realloc(result, sizeof(char)*(res_len+1));
         strncat(result,aux,cat_len);
 
     }
@@ -310,6 +311,8 @@ bool prcs_try_start_execution(Process *prcs){
         transfs[prcs->req->data->transfs[i]].running_inst++;
     }
 
+    fprintf(stderr, "[DEBUG] Executando process request\n");
+
     return true;
 }
 
@@ -323,8 +326,6 @@ void prcs_free(Process prcs){
 
 void handle_prcs_queues(){
     if(!pq_is_empty(executing_prcs_queue)){
-        // usleep(10*1000); // 10ms
-        // printf("handling execution queue\n");
         Process prcs;
 
         while(pq_dequeue(&prcs, executing_prcs_queue)){
@@ -335,7 +336,7 @@ void handle_prcs_queues(){
             }
             prcs.completed_num = end_num;
             if(end_num==prcs.req->data->transf_num){
-                printf("prcs done\n");
+                fprintf(stderr, "[DEBUG] Acabado process request\n");
                 prcs.status = CONCLUDED;
                 send_proc_status(&prcs);
                 prcs_free(prcs);
@@ -423,6 +424,7 @@ bool request_loop(int fifo_fd){
         }
         else if(hdr.type==PROCESS_REQUEST){
             if(p_req==NULL){
+                fprintf(stderr, "[DEBUG] Recebi um process request\n");
                 p_req = calloc(1, sizeof(Request)+sizeof(ProcessRequestData));
                 *p_req = hdr;
                 read_buf = (char*)p_req->data;
@@ -443,7 +445,7 @@ bool request_loop(int fifo_fd){
                         pq_enqueue(&prcs, pending_prcs_queue);
                     }
 
-                    fprintf(stderr, "[DEBUG] executing new process\n");
+                    
                 }
                 else{
                     fprintf(stderr, "[DEBUG] rejected new process\n");
@@ -495,12 +497,12 @@ int main(int argc, char* argv[]){
     pending_prcs_queue = pq_new(sizeof(Process), process_prio_comp);
     pending_prcs_queue_swap = pq_new(sizeof(Process), process_prio_comp);
 
-    signal(SIGINT, sigint_handler);
+    signal(SIGTERM, sigterm_handler);
+    signal(SIGINT, sigterm_handler);
 
     printf("\nSETUP COMPLETE...\n");
 
     while(!server_exit || (!pq_is_empty(executing_prcs_queue) || !pq_is_empty(pending_prcs_queue))){
-        // printf("Searching for requests...\n");
         request_loop(fifo_fd);
         handle_prcs_queues();
     }
@@ -518,6 +520,8 @@ int main(int argc, char* argv[]){
     close(fifo_fd_wr);
 
     fprintf(stderr, "[DEBUG] closing...\n");
+
+    unlink(CLIENT_TO_SERVER_FIFO);
 
     return 0;
 }

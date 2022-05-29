@@ -26,54 +26,50 @@ int fd[2];
 char server_to_client_fifo[84];
  /* Abre o FIFO criado pelo servidor em modo escrita para poder enviar requests para o servidor.
     Coloca o file descriptor no índice 0 do array de file descriptors relativo à escrita.
-    Retorna 1 em caso de insucesso ao abrir o FIFO e 0 em caso de sucesso. */
-int open_client_to_server_fifo(){
+    Retorna false em caso de insucesso ao abrir o FIFO e true em caso de sucesso. */
+bool open_client_to_server_fifo(){
 
     //printf("[DEBUG] Opening client to server fifo...\n");
     fd[0] = open(CLIENT_TO_SERVER_FIFO, O_WRONLY);
-    if(fd[0] == -1) return 1; //falhou ligação
+    if(fd[0] == -1) return false; //falhou ligação
     //printf("[DEBUG] Connection established\n");
     
-    return 0;
+    return true;
 }
-int create_server_to_client_fifo(){
+bool create_server_to_client_fifo(){
 
     int str_len = 29 + NO_DIGITS(getpid());
-    // char server_to_client_fifo[str_len];
     int n = snprintf(server_to_client_fifo, str_len, SERVER_TO_CLIENT_FIFO_TEMPL"%d", getpid());
     if(n>0 && n<=str_len){
-        //fprintf(stderr,"\nOpening server to client fifo...\n");
-        fprintf(stderr,"\n");
-        fprintf(stderr,"%s", server_to_client_fifo);
         if(mkfifo(server_to_client_fifo, 0666)!=0){
             perror("error making fifo");
-            return 1;
+            return false;
         }
     }
     else
-        return 1;
+        return false;
     
-    return 0;
+    return true;
 }
 
-int open_server_to_client_fifo(){
+bool open_server_to_client_fifo(){
     fd[1] = open(server_to_client_fifo, O_RDONLY);
     if(fd[1] == -1){ 
         perror("\nFailed opening FIFO. ");
-        return 1;
-    }else printf("FIFO opened.\n");
+        return false;
+    }
 
-    return 0;
+    return true;
 }
  /* Envia uma request de processamento de um ficheiro ao servidor através do respetivo FIFO. */
-int send_process_request(Request *request){
+bool send_process_request(Request *request){
     
     //printf("[DEBUG] Sending request\n");
-    if(write(fd[0], request, sizeof(Request)+sizeof(ProcessRequestData)) <= 0) return 1;
+    if(write(fd[0], request, sizeof(Request)+sizeof(ProcessRequestData)) <= 0) return false;
     //printf("[DEBUG] Request sent.\n");
 
     close(fd[0]);
-    return 0; 
+    return true; 
 }
  /* Preenche os dados relativos a uma request de processamento de um ficheiro.
     Coloca a informação na struct endereçada nos argumentos. */
@@ -112,13 +108,13 @@ void create_status_request(Request *req){
 
 }
  /* Envia uma request de status ao servidor através do respetivo FIFO. */
-int send_status_request(Request *req){
+bool send_status_request(Request *req){
 
     //printf("[DEBUG] Sending status request\n");
-    write(fd[0], req, sizeof(Request));
+    if(write(fd[0], req, sizeof(Request))==-1) return false;
     //printf("[DEBUG] Status request sent.\n");
     
-    return 0;
+    return true;
 }
  /* Leitura de um caractere de um dado input. */
 int readc(int fd, char* c){
@@ -140,7 +136,7 @@ ssize_t readln(int fd, char *buf, size_t size){
     return i;
 }
  /* Leitura e escrita para o STDOUT da resposta do servidor a uma request. */
-int get_response(){
+bool get_response(){
 
     int n;
     Message message;
@@ -154,17 +150,10 @@ int get_response(){
     }
     if(n==-1){
         perror("[CLIENT->SERVER FIFO]");
-        return 1;
+        return false;
     }
 
-    return 0;
-}
- /* Pedido de status ao servidor. 
-    Devolve caso consiga*/
-int get_status(Request *req){
-    create_status_request(req);
-    if(send_status_request(req) == 1){ perror("Unable to send request"); return 1;}
-    return get_response();
+    return true;
 }
 
  /* Termina o programa. 
@@ -180,72 +169,63 @@ int main(int argc, char* argv[]){ //./sdstore proc-file -p prioridade samples/fi
     char req_buf[sizeof(Request)+sizeof(ProcessRequestData)];
     Request *req = (Request*)req_buf;
 
-    int i, total_num_transfs = 0;
+    int arg_iter=1;
 
     if(argc > 1){
-        if(strcmp(argv[1], "proc-file") == 0){
-            if(strcmp(argv[2], "-p") == 0){ //com flag priority
-                char* execs[argc - 6];
+        if(strcmp(argv[arg_iter], "proc-file")==0){
+            
+            arg_iter++;
+            
+            int priority=0;
 
-                for(i = 6; i < argc; i++){
-                    execs[total_num_transfs] = argv[i];
-                    total_num_transfs++;
-                }
-
-                // realpath falha para ficheiros não existentes
-                if( open(argv[4], O_CREAT | O_RDONLY, 0666)==-1 ||
-                    open(argv[5], O_CREAT | O_TRUNC, 0666)==-1)
-                {
-                    perror("Error opening paths");
-                    return 1;
-                }
-                open_client_to_server_fifo(); 
-                if(create_server_to_client_fifo()){
-                    perror("Failed to create or open server to client fifo");
-                    return 1;
-                }
-                create_process_request(atoi(argv[3]), execs, total_num_transfs, argv[4], argv[5], req);
-                if(send_process_request(req)) perror("Unable to make request.");
-                open_server_to_client_fifo();
-                get_response();
-                terminate_prog();
-            } else{
-                char* execs[argc - 4];
-
-                for(i = 4; i < argc; i++){
-                    execs[total_num_transfs] = argv[i];
-                    total_num_transfs++;
-                }
-
-                if( open(argv[2], O_CREAT | O_RDONLY, 0666)==-1 ||
-                    open(argv[3], O_CREAT | O_TRUNC, 0666)==-1)
-                {
-                    perror("Error opening paths");
-                    return 1;
-                }
-                open_client_to_server_fifo();
-                if(create_server_to_client_fifo()){
-                    perror("Failed to create or open server to client fifo");
-                    return 1;
-                }
-                create_process_request(0, execs, total_num_transfs, argv[2], argv[3], req);
-                if(send_process_request(req)) perror("Unable to make request.");
-                open_server_to_client_fifo();
-                if(get_response()) perror("Unable to get response.");
-                terminate_prog();
+            if(strcmp(argv[arg_iter], "-p")==0){
+                arg_iter++;
+                priority = atoi(argv[arg_iter++]);
+                priority =  priority>5 ? 
+                                5 : priority<0 ? 
+                                    0 : priority;
             }
 
-        } else if(strcmp(argv[1], "status") == 0){
-            create_server_to_client_fifo();
-            create_status_request(req);
-            open_client_to_server_fifo();
-            send_status_request(req);
-            open_server_to_client_fifo();
-            get_response();
+            char *inp_path = argv[arg_iter++];
+            char *out_path = argv[arg_iter++];
+
+            int fd1=-1, fd2=-1;
+            // realpath falha para ficheiros não existentes
+            if( (fd1=open(inp_path, O_CREAT | O_RDONLY, 0666))==-1 ||
+                (fd2=open(out_path, O_CREAT | O_TRUNC, 0666))==-1)
+            {
+                perror("Error opening paths");
+                return 1;
+            }
+            close(fd1);
+            close(fd2);
+
+            if( !create_process_request(priority, argv+arg_iter, argc-arg_iter, inp_path, out_path, req) ||
+                !create_server_to_client_fifo() || 
+                !open_client_to_server_fifo() || 
+                !send_process_request(req) ||
+                !open_server_to_client_fifo() ||
+                !get_response())
+            {
+                fprintf(stderr, "Failed to make request\n");
+            }
             terminate_prog();
         }
-    }else{
-        fprintf(stderr, "[DEBUG] wrong arg count\n");
+        else if(strcmp(argv[1], "status")==0){
+            create_status_request(req);
+            if( !create_server_to_client_fifo() ||
+                !open_client_to_server_fifo() || 
+                !send_status_request(req) ||
+                !open_server_to_client_fifo() ||
+                !get_response())
+            {
+                fprintf(stderr, "Failed to make request\n");
+            }
+            terminate_prog();
+        }
+    }
+    else{
+        fprintf(stderr, "Wrong arg count\n");
     }
     return 0;
 }
