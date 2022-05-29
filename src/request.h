@@ -28,7 +28,6 @@ typedef enum Status{
 }Status;
 
 typedef struct Message{
-    bool wait; // wait true, o cliente espera por mais mensagens (vice-versa)
     int len;
     char data[];
 }Message;

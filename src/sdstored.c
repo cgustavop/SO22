@@ -190,12 +190,10 @@ int get_IO_bytes_info(char **response, int input_fd, int output_fd){
     return res_len;
 }
 
-void send_response(int pipe_fd, char response[], int response_len, bool wait){
-    
+void send_response(int pipe_fd, char response[], int response_len){
     char res_buf[sizeof(Message)+(sizeof(char)*response_len)];
     Message *message = (Message*)res_buf;
 
-    message->wait = wait;
     message->len = response_len;
     memcpy(message->data, response, (sizeof(char)*response_len));
 
@@ -209,16 +207,16 @@ void send_proc_status(const Process *prcs){
     switch(prcs->status){
         case FAILURE:
             res_len = 32;
-            send_response(prcs->pipe_fd, "failed to process your request\n", res_len, false);
+            send_response(prcs->pipe_fd, "failed to process your request\n", res_len);
             break;
         case PENDING:
             res_len = 9;
-            send_response(prcs->pipe_fd, "pending\n", res_len, true);
+            send_response(prcs->pipe_fd, "pending\n", res_len);
             break;
         
         case PROCESSING:
             res_len = 11;
-            send_response(prcs->pipe_fd, "processing\n", res_len, true);
+            send_response(prcs->pipe_fd, "processing\n", res_len);
             break;
         case CONCLUDED:
             res_len = 11;
@@ -227,7 +225,7 @@ void send_proc_status(const Process *prcs){
             char *response = malloc(res_len*sizeof(char));
             memcpy(response, "concluded\n", 11);
             memcpy(response+11, bytes, res_len-11);
-            send_response(prcs->pipe_fd, response, res_len, false);
+            send_response(prcs->pipe_fd, response, res_len);
             free(response);
             free(bytes);
             break;
@@ -410,9 +408,10 @@ bool request_loop(int fifo_fd){
             int res_len = get_status(&response);
             int pipe_fd = open_server_to_client_fifo(hdr.client_pid);
             if(pipe_fd!=-1){
-                send_response(pipe_fd, response, res_len, false);
+                send_response(pipe_fd, response, res_len);
             }
             free(response);
+            close(pipe_fd);
             read_buf = (char*)&hdr;
             read_buf_size = sizeof(Request);
         }

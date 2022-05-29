@@ -16,7 +16,6 @@
 
 static_assert(sizeof(Request)+sizeof(ProcessRequestData)<=PIPE_BUF, "Request's too big. Non atomic writes");
 
-char SERVER_TO_CLIENT_FIFO[25];
 
  /* Guarda os file descriptors dos FIFOs.
     fd[0] para escrita
@@ -109,11 +108,7 @@ void create_status_request(Request *req){
 }
  /* Envia uma request de status ao servidor através do respetivo FIFO. */
 bool send_status_request(Request *req){
-
-    //printf("[DEBUG] Sending status request\n");
     if(write(fd[0], req, sizeof(Request))==-1) return false;
-    //printf("[DEBUG] Status request sent.\n");
-    
     return true;
 }
  /* Leitura de um caractere de um dado input. */
@@ -141,12 +136,10 @@ bool get_response(){
     int n;
     Message message;
     while((n=read(fd[1], &message, sizeof(Message)))>0){
-        //fprintf(stderr, "[DEBUG] Status response received!");
         int len = message.len;
         char data[len];
         read(fd[1], &data, sizeof(char)*len);
         write(STDOUT_FILENO,data,sizeof(char)*len);
-        if(!message.wait) break;
     }
     if(n==-1){
         perror("[CLIENT->SERVER FIFO]");
@@ -161,7 +154,7 @@ bool get_response(){
 void terminate_prog(){
     close(fd[0]);
     close(fd[1]);
-    unlink(SERVER_TO_CLIENT_FIFO);
+    unlink(server_to_client_fifo);
 }
                                     //    0      1           2               3                   4...
 int main(int argc, char* argv[]){ //./sdstore proc-file -p prioridade samples/file-a outputs/file-a-output bcompress nop gcompress encrypt nop
