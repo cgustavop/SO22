@@ -59,7 +59,7 @@ ssize_t readln(int fd, char *buf, size_t size){
 }
 
 int request_prio_comp(void *va, void *vb){
-    Request *a = *(Request**)va, *b = *(Request**)vb;
+    Request *a = (Request*)va, *b = (Request*)vb;
 
     if(a->priority>b->priority)
         return 1;
@@ -70,7 +70,7 @@ int request_prio_comp(void *va, void *vb){
 }
 
 int process_prio_comp(void *va, void *vb){
-    return request_prio_comp(&((Process*)va)->req, &((Process*)vb)->req);
+    return request_prio_comp(((Process*)va)->req, ((Process*)vb)->req);
 }
 
 
