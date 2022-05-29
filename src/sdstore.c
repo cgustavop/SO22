@@ -89,8 +89,8 @@ bool create_process_request(int priority, char** execs, int total_num_transfs, c
     }
     char *inp = realpath(input_path, NULL);
     char *outp = realpath(output_path, NULL);
-    strncpy(req_data->input, inp, strlen(inp)+1);
-    strncpy(req_data->output, outp, strlen(outp)+1);
+    memcpy(req_data->input, inp, strlen(inp)+1);
+    memcpy(req_data->output, outp, strlen(outp)+1);
     free(inp);
     free(outp);
 

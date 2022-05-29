@@ -1,5 +1,5 @@
 CC = gcc
-CCFLAGS = -g -Wall -Werror -Wextra -pedantic -fsanitize=address -fsanitize=undefined -lm
+CCFLAGS = -g -Wall -Werror -Wextra -pedantic -lm
 
 all: bin/sdstore bin/sdstored execs
 

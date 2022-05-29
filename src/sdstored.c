@@ -129,7 +129,6 @@ int open_server_to_client_fifo(int client_pid){
 int get_status(char **response){
     char *result = NULL;
     char aux[1024];
-    int i = 0;
     size_t cat_len = 0, res_len = 0;
 
     PQ_FOREACH(process, Process, executing_prcs_queue){
@@ -145,18 +144,15 @@ int get_status(char **response){
             res_len += cat_len;
             result = realloc(result, sizeof(char)*(res_len+1));
             strncat(result,aux,cat_len);
-            j++;
         }
 
         res_len += 1;
         result = realloc(result, sizeof(char)*(res_len+1));
         strncat(result,"\n",2);
-        i++;
-
     }
     
 
-    for(i = 0; i < TOTAL_TRANSFORMATIONS; i++){
+    for(int i = 0; i < TOTAL_TRANSFORMATIONS; i++){
 
         cat_len = snprintf(aux, 1024, "transf %s: %d/%d (running/max)\n", transfs[i].name, transfs[i].running_inst, transfs[i].max_inst);
         res_len += cat_len;
