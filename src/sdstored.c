@@ -355,8 +355,6 @@ void handle_prcs_queues(){
                 pq_enqueue(&prcs, executing_prcs_queue);
             }
             else{
-                prcs.status = PENDING;
-                send_proc_status(&prcs);
                 pq_enqueue(&prcs, pending_prcs_queue);
             }
         }
@@ -468,6 +466,9 @@ int main(int argc, char* argv[]){
         return 1;
     }
 
+    signal(SIGTERM, sigterm_handler);
+    signal(SIGINT, sigterm_handler);
+
     server_pid = getpid();
     transf_folder = argv[2]; //guarda o path onde estão guardadas as transformações
     printf("SETTING UP SERVER...\n");
@@ -492,9 +493,6 @@ int main(int argc, char* argv[]){
     executing_prcs_queue_swap = pq_new(sizeof(Process), process_prio_comp);
     pending_prcs_queue = pq_new(sizeof(Process), process_prio_comp);
     pending_prcs_queue_swap = pq_new(sizeof(Process), process_prio_comp);
-
-    signal(SIGTERM, sigterm_handler);
-    signal(SIGINT, sigterm_handler);
 
     printf("\nSETUP COMPLETE...\n");
 
